@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">智AI</string>
+    <string name="accessibility_description">ZhiAI 无障碍服务用于显示浮窗控制界面。</string>
+    <string name="settings_title">设置</string>
+    <string name="api_settings">API 设置</string>
+    <string name="base_url">Base URL</string>
+    <string name="api_key">API Key</string>
+    <string name="model_name">Model Name</string>
+    <string name="save">保存</string>
+    <string name="enable_service">启用无障碍服务</string>
+    <string name="service_status">服务状态</string>
+    <string name="service_enabled">已启用</string>
+    <string name="service_disabled">未启用</string>
+</resources>

@@ -1,0 +1,192 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:clean UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateDebugResValues
+> Task :app:dataBindingMergeDependencyArtifactsDebug
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:checkDebugAarMetadata
+> Task :app:compileDebugNavigationResources
+> Task :app:mapDebugSourceSetPaths
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:mergeDebugResources
+> Task :app:javaPreCompileDebug
+> Task :app:mergeDebugShaders
+> Task :app:dataBindingGenBaseClassesDebug
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets
+> Task :app:desugarDebugFileDependencies
+> Task :app:mergeDebugJniLibFolders
+> Task :app:checkDebugDuplicateClasses
+> Task :app:processDebugManifestForPackage
+> Task :app:mergeDebugNativeLibs
+> Task :app:mergeLibDexDebug
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:stripDebugDebugSymbols
+> Task :app:buildKotlinToolingMetadata
+> Task :app:mergeReleaseNativeLibs
+> Task :app:dataBindingMergeDependencyArtifactsRelease
+> Task :app:generateReleaseResValues
+> Task :app:generateReleaseResources
+> Task :app:stripReleaseDebugSymbols
+> Task :app:processDebugResources
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:mergeReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:processReleaseNavigationResources
+> Task :app:checkReleaseAarMetadata
+> Task :app:compileReleaseNavigationResources
+> Task :app:parseReleaseLocalResources
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:dataBindingGenBaseClassesRelease
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile
+> Task :app:javaPreCompileRelease
+
+> Task :app:compileDebugKotlin
+w: file:///Users/qs/Documents/Open-AutoGLM/ZhiAI/app/src/main/java/com/qs/phone/ui/DiagnosticTool.kt:84:33 'static field DEVELOPMENT_SETTINGS_ENABLED: String' is deprecated. Deprecated in Java.
+
+> Task :app:mergeExtDexDebug
+> Task :app:compileDebugJavaWithJavac
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics
+> Task :app:processDebugJavaRes
+> Task :app:processReleaseManifestForPackage
+> Task :app:mergeReleaseArtProfile
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets
+> Task :app:mergeProjectDexDebug
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:extractProguardFiles
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:mergeDebugJavaResource
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:generateDebugAndroidTestResValues
+> Task :app:processReleaseResources
+> Task :app:mergeExtDexRelease
+> Task :app:generateDebugAndroidTestLintModel
+> Task :app:generateDebugLintReportModel
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:generateDebugUnitTestLintModel
+
+> Task :app:compileReleaseKotlin
+w: file:///Users/qs/Documents/Open-AutoGLM/ZhiAI/app/src/main/java/com/qs/phone/ui/DiagnosticTool.kt:84:33 'static field DEVELOPMENT_SETTINGS_ENABLED: String' is deprecated. Deprecated in Java.
+
+> Task :app:packageDebug
+> Task :app:optimizeReleaseResources
+> Task :app:lintAnalyzeDebug
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:dexBuilderRelease
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:processReleaseJavaRes
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:mergeReleaseJavaResource
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:preReleaseUnitTestBuild UP-TO-DATE
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:javaPreCompileReleaseUnitTest
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:compileReleaseUnitTestKotlin
+> Task :app:testDebugUnitTest
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:mergeDexRelease
+> Task :app:testReleaseUnitTest
+> Task :app:test
+> Task :app:compileReleaseArtProfile
+> Task :app:lintAnalyzeDebugAndroidTest
+> Task :app:lintAnalyzeDebugUnitTest
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintVitalReportRelease SKIPPED
+> Task :app:lintVitalRelease SKIPPED
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+> Task :app:assemble
+
+> Task :app:lintReportDebug
+Wrote HTML report to file:///Users/qs/Documents/Open-AutoGLM/ZhiAI/app/build/reports/lint-results-debug.html
+Lint found 2 errors and 54 warnings. First failure:
+/Users/qs/Documents/Open-AutoGLM/ZhiAI/app/src/main/java/com/qs/phone/shell/ShellExecutor.kt:114: Error: Call requires API level 26 (current min is 24): java.lang.ProcessBuilder#redirectOutput [NewApi]
+                    redirectOutput(outputBufferFile)
+                    ~~~~~~~~~~~~~~
+
+
+> Task :app:lintDebug FAILED
+Lint found 2 errors, 54 warnings. First failure:
+
+/Users/qs/Documents/Open-AutoGLM/ZhiAI/app/src/main/java/com/qs/phone/shell/ShellExecutor.kt:114: Error: Call requires API level 26 (current min is 24): java.lang.ProcessBuilder#redirectOutput [NewApi]
+                    redirectOutput(outputBufferFile)
+                    ~~~~~~~~~~~~~~
+
+The full lint text report is located at:
+  /Users/qs/Documents/Open-AutoGLM/ZhiAI/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:lintDebug'.
+> Lint found errors in the project; aborting build.
+  
+  Fix the issues identified by lint, or create a baseline to see only new errors.
+  To create a baseline, run `gradlew updateLintBaseline` after adding the following to the module's build.gradle file:
+  ```
+  android {
+      lint {
+          baseline = file("lint-baseline.xml")
+      }
+  }
+  ```
+  For more details, see https://developer.android.com/studio/write/lint#snapshot
+  
+  Lint found 2 errors, 54 warnings. First failure:
+  
+  /Users/qs/Documents/Open-AutoGLM/ZhiAI/app/src/main/java/com/qs/phone/shell/ShellExecutor.kt:114: Error: Call requires API level 26 (current min is 24): java.lang.ProcessBuilder#redirectOutput [NewApi]
+                      redirectOutput(outputBufferFile)
+                      ~~~~~~~~~~~~~~
+  
+  The full lint text report is located at:
+    /Users/qs/Documents/Open-AutoGLM/ZhiAI/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1m 36s
+112 actionable tasks: 111 executed, 1 up-to-date
