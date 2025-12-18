@@ -190,7 +190,7 @@ class FloatingWindowService : AccessibilityService() {
 
         // 默认显示主界面
         windowManager?.addView(floatingView, mainParams)
-        appendLog("🤝 你好,我是你的AI助手.\n你可以让我执行一些简单的操作哦!\n"+"🎉比如点杯奶茶,自己刷会抖音,微信回复XX信息.")
+        appendLog("🤝 你好,我是你的AI助手.\n你可以让我执行一些简单的操作哦!\n"+"🎉比如点杯奶茶,自己刷会抖音,微信回复XX信息.\n    任务开始窗口会自动隐藏\n    运行中不要打开本窗口\n    否则会阻塞程序正常执行")
 
     }
 
@@ -519,7 +519,7 @@ class FloatingWindowService : AccessibilityService() {
 
     fun clearLogs() {
         logTextView?.text = ""
-        appendLog("🤝 你好,我是你的AI助手.\n你可以让我执行一些简单的操作哦!\n"+"🎉比如点杯奶茶,自己刷会抖音,微信回复XX信息.")
+        appendLog("🤝 你好,我是你的AI助手.\n你可以让我执行一些简单的操作哦!\n"+"🎉比如点杯奶茶,自己刷会抖音,微信回复XX信息.\n    任务开始窗口会自动隐藏\n    运行中不要打开本窗口\n    否则会阻塞程序正常执行")
     }
 
     private fun updateStatusIndicator(isRunning: Boolean) {
