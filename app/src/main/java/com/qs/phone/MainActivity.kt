@@ -22,6 +22,7 @@ import com.qs.phone.ui.DiagnosticTool
 import com.qs.phone.ui.ErrorDialog
 import com.qs.phone.util.NativeLibraryLoader
 import com.qs.phone.util.PermissionManager
+import com.qs.phone.controller.AppDetectionTest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -217,6 +218,10 @@ class MainActivity : AppCompatActivity() {
             mainScope.launch {
                 try {
                     Toast.makeText(this@MainActivity, "正在运行诊断...", Toast.LENGTH_SHORT).show()
+
+                    // 测试新的应用检测功能
+                    val appDetectionTest = AppDetectionTest(this@MainActivity)
+                    appDetectionTest.testAppDetection()
 
                     val results = DiagnosticTool.runFullDiagnostic(this@MainActivity)
                     val report = DiagnosticTool.generateReport(results)

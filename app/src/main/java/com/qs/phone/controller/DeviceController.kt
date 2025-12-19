@@ -35,6 +35,9 @@ class DeviceController(
     // ?? lazy ??????????
     private val shell by lazy { ShellExecutor(context) }
 
+    // 应用检测器（不使用 ADB）
+    private val appDetector by lazy { AppDetector(context) }
+
     /**
      * 判断文件是否处于写入/加载中（非最终完成状态）
      * @param file 图片文件
@@ -111,6 +114,11 @@ class DeviceController(
             ScreenshotResult(null, null, 0, 0)
         }
     }
+
+    /**
+     * 获取应用检测方法信息（用于调试）
+     */
+    fun getAppDetectionInfo(): String = appDetector.getDetectionMethodsInfo()
 
     /**
      * 清理所有临时截屏文件
@@ -347,9 +355,25 @@ class DeviceController(
     }
 
     /**
-     * 获取当前应用
+     * 获取当前应用（不使用 ADB）
      */
     suspend fun getCurrentApp(): String {
+        return try {
+            Log.d(TAG, "Getting current app without ADB")
+            val appName = appDetector.getCurrentApp()
+            Log.d(TAG, "Detected app: $appName")
+            appName
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get current app without ADB", e)
+            // 作为最后的备用方案，使用 ADB 方法
+            getCurrentAppViaADB()
+        }
+    }
+
+    /**
+     * 通过 ADB 获取当前应用（备用方案）
+     */
+    private suspend fun getCurrentAppViaADB(): String {
         // 直接从顶层Activity中查找包名
         val result = shell.executeShell("am dumpsys activity top")
         if (result.success) {

@@ -138,7 +138,7 @@ class ShellExecutor(private val context: Context) {
 
             Log.d(TAG, "Command : $command")
             Log.d(TAG, "Exit code: $exitCode")
-            Log.e(TAG, "stderr: $stderr")
+//            Log.e(TAG, "stderr: $stderr")
             Log.d(TAG, "stderr: $stdout")
 
             ShellResult(

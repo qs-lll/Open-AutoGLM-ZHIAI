@@ -58,6 +58,9 @@ class FloatingWindowService : AccessibilityService() {
         var modelName = "autoglm-phone"
     }
 
+    // 保存最后一个无障碍事件
+    private var lastAccessibilityEvent: AccessibilityEvent? = null
+
     private var windowManager: WindowManager? = null
     private var floatingView: View? = null
     private var widgetView: View? = null
@@ -101,7 +104,18 @@ class FloatingWindowService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 不需要处理无障碍事件
+        // 保存最后一个无障碍事件，用于应用检测
+        event?.let {
+            // 只关注应用程序类型的事件
+            if (it.packageName != null && it.eventType in listOf(
+                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                    AccessibilityEvent.TYPE_VIEW_FOCUSED
+                )) {
+                lastAccessibilityEvent = it
+                Log.d(TAG, "Saved accessibility event for package: ${it.packageName}")
+            }
+        }
     }
 
     override fun onInterrupt() {
@@ -701,5 +715,10 @@ class FloatingWindowService : AccessibilityService() {
             Log.e(TAG, "Failed to send takeover notification", e)
         }
     }
+
+    /**
+     * 获取最后一个无障碍事件
+     */
+    fun getLastAccessibilityEvent(): AccessibilityEvent? = lastAccessibilityEvent
 
 }

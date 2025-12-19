@@ -174,53 +174,8 @@ class PhoneAgent(
                 return StepResult(false, true, null, "", "截图失败")
             }
 
-            // 使用无障碍服务检测当前应用
-            val currentApp = try {
-                // 通过无障碍服务获取当前前台应用
-                val service = FloatingWindowService.instance
-                if (service != null) {
-                    // 使用无障碍服务获取当前窗口信息
-                    val packageName = try {
-                        // 通过 AccessibilityService 获取当前焦点窗口
-                        val hasFocusedApp = service.windows?.any { window ->
-                            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
-                            window.isFocused
-                        } == true
-
-                        if (hasFocusedApp) {
-                            // 获取当前活动窗口的根节点
-                            val rootNode = service.rootInActiveWindow
-                            val pkgName = rootNode?.packageName?.toString()
-                            // 在新版本中不需要手动 recycle
-                            pkgName
-                        } else {
-                            null
-                        }
-                    } catch (e: Exception) {
-                        Log.d(TAG, "Failed to get window info via accessibility service", e)
-                        null
-                    }
-
-                    if (!packageName.isNullOrEmpty()) {
-                        // 检查是否是已知的系统应用
-                        when {
-                            packageName.contains("launcher") -> "Home"
-                            packageName.contains("system") -> "System"
-                            else -> packageName
-                        }
-                    } else {
-                        // 回退到传统的 ADB 方法
-                        deviceController.getCurrentApp()
-                    }
-                } else {
-                    // 如果无障碍服务未运行，使用 ADB 方法
-                    deviceController.getCurrentApp()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to get current app via accessibility service", e)
-                // 回退到 ADB 方法
-                deviceController.getCurrentApp()
-            }
+            // 使用新的应用检测器（不使用 ADB）
+            val currentApp = deviceController.getCurrentApp()
 
             // 如果是包名且不在已知应用列表中，添加提示
             val appDisplay = when {
