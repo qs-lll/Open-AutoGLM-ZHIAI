@@ -286,10 +286,10 @@
                     android:paddingBottom="8dp" />
 
                 <Button
-                    android:id="@+id/enableTcpButton"
+                    android:id="@+id/dnsConnectButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="启用 TCP 模式 (5555)"
+                    android:text="DNS 连接无线调试"
                     android:layout_marginBottom="8dp"
                     style="@style/Widget.Material3.Button.TonalButton" />
 

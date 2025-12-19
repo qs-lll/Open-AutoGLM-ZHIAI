@@ -18,7 +18,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 import java.io.PrintStream
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -26,7 +25,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * LADB Shell 执行器 - 100% 实现 LADB 所有功能
@@ -75,7 +73,7 @@ class ShellExecutor(private val context: Context) {
     private var shellProcess: Process? = null
 
     /**
-     * 初始化 ADB 连接 - 完整实现 LADB 的 initServer 功能
+     * 初始化 ADB 连接 - 简化版本，不依赖交互式 shell
      */
     suspend fun initServer(): Boolean = withContext(Dispatchers.IO) {
         if (_running.value == true || tryingToPair)
@@ -85,7 +83,7 @@ class ShellExecutor(private val context: Context) {
         debug("Starting initialization...")
 
         try {
-            // LADB 方式：不进行显式加载，直接使用库路径
+            // 检查 ADB 库文件是否存在
             val adbFile = File(adbPath)
             if (!adbFile.exists()) {
                 Log.e(TAG, "ADB library not found at $adbPath")
@@ -115,7 +113,7 @@ class ShellExecutor(private val context: Context) {
                 }
             }
 
-            // 等待无线调试启用
+            // 等待调试启用
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 if (!isWirelessDebuggingEnabled()) {
                     debug("Wireless debugging is not enabled!")
@@ -142,117 +140,23 @@ class ShellExecutor(private val context: Context) {
                 }
             }
 
-            // 启动 DNS 发现
-            dnsDiscover = DnsDiscover.getInstance(context, nsdManager)
-            dnsDiscover?.scanAdbPorts()
+            // 测试 ADB 连接
+            Log.d(TAG, "Testing ADB connection...")
+            val testProcess = adb(false, listOf("devices"))
+            val testSuccess = testProcess.waitFor(10, TimeUnit.SECONDS)
+            val testOutput = BufferedReader(testProcess.inputStream.reader()).readText()
 
-            // 等待 DNS 解析完成
-            val nowTime = System.currentTimeMillis()
-            val maxTimeoutTime = nowTime + 10.seconds.inWholeMilliseconds
-            val minDnsScanTime = (DnsDiscover.aliveTime ?: nowTime) + 3.seconds.inWholeMilliseconds
-
-            var dnsWaitCount = 0
-            while (true) {
-                val currentTime = System.currentTimeMillis()
-                val pendingResolves = DnsDiscover.pendingResolves.get()
-
-                if (currentTime >= minDnsScanTime && !pendingResolves) {
-                    debug("DNS resolver done...")
-                    break
-                }
-
-                if (currentTime >= maxTimeoutTime) {
-                    debug("DNS resolver took too long! Skipping...")
-                    break
-                }
-
-                if (dnsWaitCount % 3 == 0) {
-                    debug("Awaiting DNS resolver... (${dnsWaitCount}/30)")
-                }
-
-                Thread.sleep(1_000)
-                dnsWaitCount++
-                if (dnsWaitCount >= 30) break
-            }
-
-            val adbPort = DnsDiscover.adbPort
-            if (adbPort != null) {
-                debug("Best ADB port discovered: $adbPort")
+            if (testSuccess) {
+                Log.d(TAG, "ADB connection test successful")
+                Log.d(TAG, "Test output: $testOutput")
             } else {
-                debug("No ADB port discovered, fallback...")
-            }
-
-            // 启动 ADB 服务器
-            debug("Starting ADB server...")
-            adb(false, listOf("start-server")).waitFor(1, TimeUnit.MINUTES)
-
-            // 等待设备连接
-            val waitProcess = if (adbPort != null) {
-                adb(false, listOf("connect", "localhost:$adbPort")).waitFor(1, TimeUnit.MINUTES)
-            } else {
-                adb(false, listOf("wait-for-device")).waitFor(1, TimeUnit.MINUTES)
-            }
-
-            if (!waitProcess) {
-                debug("Your device didn't connect to LADB")
-                debug("If a reboot doesn't work, please contact support")
-
-                if (isMobileDataAlwaysOnEnabled()) {
-                    debug("Please disable 'Mobile data always on' in Developer Settings!")
-                    Thread.sleep(5_000)
-                }
-
+                Log.e(TAG, "ADB connection test failed")
+                Log.e(TAG, "Test output: $testOutput")
                 tryingToPair = false
                 return@withContext false
             }
 
-            // 获取设备列表并选择
-            val deviceList = getDevices()
-            Log.d("DEVICES", "Devices: $deviceList")
-
-            shellProcess = if (deviceList.isNotEmpty()) {
-                var argList = listOf("shell")
-
-                // 多设备处理
-                if (deviceList.size > 1) {
-                    Log.w("DEVICES", "Multiple devices detected...")
-                    val localDevices = deviceList.filter { it.contains("localhost") }
-
-                    if (localDevices.isNotEmpty()) {
-                        val serialId = localDevices.first()
-                        Log.w("DEVICES", "Choosing first local device: $serialId")
-                        argList = listOf("-s", serialId, "shell")
-                    } else {
-                        val nonEmulators = deviceList.filterNot { it.contains("emulator") }
-                        if (nonEmulators.isNotEmpty()) {
-                            val serialId = nonEmulators.first()
-                            Log.w("DEVICES", "Choosing first non-emulator device: $serialId")
-                            argList = listOf("-s", serialId, "shell")
-                        } else {
-                            val serialId = deviceList.first()
-                            Log.w("DEVICES", "Choosing first unrecognized device: $serialId")
-                            argList = listOf("-s", serialId, "shell")
-                        }
-                    }
-                }
-
-                adb(true, argList)
-            } else {
-                adb(true, listOf("shell"))
-            }
-
-            // 设置别名
-            sendToShellProcess("alias adb=\"$adbPath\"")
-            debug("Set adb alias: $adbPath")
-
-            // 授予权限
-            if (!secureSettingsGranted) {
-                sendToShellProcess("pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS &> /dev/null")
-            }
-
-            // 启动消息
-            sendToShellProcess("echo 'Entered adb shell'")
-
+            // 设置为已初始化状态
             _running.postValue(true)
             tryingToPair = false
             debug("Initialization completed successfully!")
@@ -315,11 +219,7 @@ class ShellExecutor(private val context: Context) {
             devicesProcess.waitFor()
 
             val linesRaw = BufferedReader(devicesProcess.inputStream.reader()).readLines()
-//            val cap =adb(false, listOf("exec-out screencap -p /sdcard/Android/data/com.draco.ladb/222.png"))
-////            val cap =adb(false, listOf("exec-out screencap -p "))
-//            cap.waitFor()
-//            val raw = BufferedReader(cap.inputStream.reader()).readLines()
-//            Log.e("BufferedReader",  raw.toString())
+
             val deviceLines = linesRaw.filterNot { it ->
                 it.contains("List of devices attached")
             }
@@ -335,79 +235,131 @@ class ShellExecutor(private val context: Context) {
         }
     }
 
-    /**
-     * 发送命令到 shell 进程 - LADB 的 sendToShellProcess 方法
-     */
-    fun sendToShellProcess(msg: String) {
-        if (shellProcess == null || shellProcess?.outputStream == null) {
-            Log.w(TAG, "Shell not initialized, cannot send: $msg")
-            return
-        }
 
+    /**
+     * 执行命令 - 使用 adb() 函数方式，和 getDevices 一样
+     */
+    suspend fun executeShell(command: String): ShellResult = withContext(Dispatchers.IO) {
         try {
-            PrintStream(shellProcess!!.outputStream!!).apply {
-                println(msg)
-                flush()
-            }
-            Log.d(TAG, "Sent to shell: $msg")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to send to shell", e)
-        }
-    }
+            Log.d(TAG, "Executing: $command")
 
-    /**
-     * 向后兼容的别名
-     */
-    fun sendToShell(msg: String) {
-        sendToShellProcess(msg)
-    }
+            // 使用和 getDevices 完全一样的方式：adb() 函数
+            val process = adb(false, listOf("shell", command))
+            val completed = process.waitFor(30, TimeUnit.SECONDS)
 
-    /**
-     * 执行命令 - 严格要求 LADB 环境
-     * 只有在 LADB 已初始化并可用时才执行命令
-     */
-    suspend fun execute(command: String): ShellResult = withContext(Dispatchers.IO) {
-        // 首先确保 LADB 已初始化
-        if (_running.value != true) {
-            val initSuccess = initServer()
-            if (!initSuccess) {
-                return@withContext ShellResult(
-                    success = false,
-                    stdout = "",
-                    stderr = "LADB 初始化失败，无法执行命令",
-                    exitCode = -1
-                )
-            }
-        }
+            // 分别读取标准输出和标准错误流
+            val stdout = BufferedReader(process.inputStream.reader()).readText()
+            val stderr = BufferedReader(process.errorStream.reader()).readText()
+            val exitCode = if (completed) process.exitValue() else -1
 
-        try {
-            Log.d(TAG, "Executing via LADB: $command")
+            Log.d(TAG, "Command completed: $command")
+            Log.d(TAG, "Exit code: $exitCode")
+            Log.d(TAG, "=== Full Shell Output ===")
+            Log.d(TAG, stdout)
+            Log.d(TAG, "=== Shell Error ===")
+            Log.d(TAG, stderr)
+            Log.d(TAG, "=== End Output ===")
 
-            // 再次检查确保 LADB 可用
-            if (_running.value == true && shellProcess != null) {
-                // 使用 LADB shell 进程 - 这里使用了 libadb.so ✅
-                sendToShell(command)
-                ShellResult(success = true, stdout = "", stderr = "", exitCode = 0)
-            } else {
-                // LADB 环境不可用，返回错误
-                Log.e(TAG, "LADB environment not available")
-                ShellResult(
-                    success = false,
-                    stdout = "",
-                    stderr = "LADB 环境不可用，请检查 LADB 初始化状态",
-                    exitCode = -1
-                )
-            }
+            ShellResult(
+                success = exitCode == 0,
+                stdout = stdout,
+                stderr = stderr,
+                exitCode = exitCode
+            )
+
+        } catch (e: java.util.concurrent.TimeoutException) {
+            Log.e(TAG, "Command timeout: $command")
+            ShellResult(false, "", "命令执行超时", -1)
         } catch (e: Exception) {
             Log.e(TAG, "Command failed", e)
-            ShellResult(
-                success = false,
-                stdout = "",
-                stderr = e.message ?: "Unknown error",
-                exitCode = -1
-            )
+            ShellResult(false, "", e.message ?: "Unknown error", -1)
         }
     }
+
+    /**
+     * 执行命令 - 使用 adb() 函数方式，和 getDevices 一样
+     */
+    suspend fun executeADB(command: String): ShellResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Executing: $command")
+
+
+            // 使用和 getDevices 完全一样的方式：adb() 函数
+            val process = adb(false, listOf(command))
+            val completed = process.waitFor(30, TimeUnit.SECONDS)
+
+            // 分别读取标准输出和标准错误流
+            val stdout = BufferedReader(process.inputStream.reader()).readText()
+            val stderr = BufferedReader(process.errorStream.reader()).readText()
+            val exitCode = if (completed) process.exitValue() else -1
+
+            Log.d(TAG, "Command completed: $command")
+            Log.d(TAG, "Final command was: $command")
+            Log.d(TAG, "Exit code: $exitCode")
+            Log.d(TAG, "=== Full Shell Output ===")
+            Log.d(TAG, stdout)
+            Log.d(TAG, "=== Shell Error ===")
+            Log.d(TAG, stderr)
+            Log.d(TAG, "=== End Output ===")
+
+            ShellResult(
+                success = exitCode == 0,
+                stdout = stdout,
+                stderr = stderr,
+                exitCode = exitCode
+            )
+
+        } catch (e: java.util.concurrent.TimeoutException) {
+            Log.e(TAG, "Command timeout: $command")
+            ShellResult(false, "", "命令执行超时", -1)
+        } catch (e: Exception) {
+            Log.e(TAG, "Command failed", e)
+            ShellResult(false, "", e.message ?: "Unknown error", -1)
+        }
+    }
+
+    /**
+     * 执行命令 - 使用 adb() 函数方式，和 getDevices 一样
+     */
+    suspend fun executeCommand(command: List<String>): ShellResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Executing: $command")
+
+
+            // 使用和 getDevices 完全一样的方式：adb() 函数
+            val process = adb(false, (command))
+            val completed = process.waitFor(30, TimeUnit.SECONDS)
+
+            // 分别读取标准输出和标准错误流
+            val stdout = BufferedReader(process.inputStream.reader()).readText()
+            val stderr = BufferedReader(process.errorStream.reader()).readText()
+            val exitCode = if (completed) process.exitValue() else -1
+
+            Log.d(TAG, "Command completed: $command")
+            Log.d(TAG, "Final command was: $command")
+            Log.d(TAG, "Exit code: $exitCode")
+            Log.d(TAG, "=== Full Shell Output ===")
+            Log.d(TAG, stdout)
+            Log.d(TAG, "=== Shell Error ===")
+            Log.d(TAG, stderr)
+            Log.d(TAG, "=== End Output ===")
+
+            ShellResult(
+                success = exitCode == 0,
+                stdout = stdout,
+                stderr = stderr,
+                exitCode = exitCode
+            )
+
+        } catch (e: java.util.concurrent.TimeoutException) {
+            Log.e(TAG, "Command timeout: $command")
+            ShellResult(false, "", "命令执行超时", -1)
+        } catch (e: Exception) {
+            Log.e(TAG, "Command failed", e)
+            ShellResult(false, "", e.message ?: "Unknown error", -1)
+        }
+    }
+
 
     /**
      * 异步执行命令 - 不等待结果，立即返回
@@ -416,39 +368,12 @@ class ShellExecutor(private val context: Context) {
     fun executeAsync(command: String, callback: ((ShellResult) -> Unit)? = null) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
-                // 首先确保 LADB 已初始化
-                if (_running.value != true) {
-                    val initSuccess = initServer()
-                    if (!initSuccess) {
-                        callback?.invoke(ShellResult(
-                            success = false,
-                            stdout = "",
-                            stderr = "LADB 初始化失败，无法执行命令",
-                            exitCode = -1
-                        ))
-                        return@launch
-                    }
-                }
+                Log.d(TAG, "Executing async: $command")
 
-                Log.d(TAG, "Executing async via LADB: $command")
+                // 直接调用 execute 方法
+                val result = executeShell(command)
+                callback?.invoke(result)
 
-                // 再次检查确保 LADB 可用
-                if (_running.value == true && shellProcess != null) {
-                    // 使用 LADB shell 进程
-                    sendToShell(command)
-                    val result = ShellResult(success = true, stdout = "", stderr = "", exitCode = 0)
-                    callback?.invoke(result)
-                } else {
-                    // LADB 环境不可用
-                    Log.e(TAG, "LADB environment not available for async command")
-                    val result = ShellResult(
-                        success = false,
-                        stdout = "",
-                        stderr = "LADB 环境不可用，请检查 LADB 初始化状态",
-                        exitCode = -1
-                    )
-                    callback?.invoke(result)
-                }
             } catch (e: Exception) {
                 Log.e(TAG, "Async command failed", e)
                 val result = ShellResult(
@@ -462,46 +387,6 @@ class ShellExecutor(private val context: Context) {
         }
     }
 
-    /**
-     * 执行 ADB 命令并捕获字节输出 - 用于读取文件
-     */
-    suspend fun executeAdbCommandBytes(command: String): ByteArray = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "Executing ADB command with byte output: $command")
-
-            // 使用 ProcessBuilder 直接执行命令
-            val process = ProcessBuilder("sh", "-c", command)
-                .redirectErrorStream(true)
-                .start()
-
-            // 读取输出流中的字节数据
-            val outputStream = java.io.ByteArrayOutputStream()
-            process.inputStream.use { input ->
-                val buffer = ByteArray(8192)
-                var bytesRead: Int
-                while (true) {
-                    bytesRead = input.read(buffer)
-                    if (bytesRead == -1) break
-                    outputStream.write(buffer, 0, bytesRead)
-                }
-            }
-
-            val exitCode = process.waitFor(10, TimeUnit.SECONDS)
-            if (!exitCode) {
-                Log.e(TAG, "Command timed out")
-                process.destroy()
-                throw Exception("命令执行超时")
-            }
-
-            val bytes = outputStream.toByteArray()
-            Log.d(TAG, "Command completed, output size: ${bytes.size} bytes")
-
-            bytes
-        } catch (e: Exception) {
-            Log.e(TAG, "ADB command failed", e)
-            throw e
-        }
-    }
 
     /**
      * 配对功能（Android 11+）- LADB 的 pair 方法
@@ -668,49 +553,30 @@ class ShellExecutor(private val context: Context) {
         }
     }
 
-    /**
-     * 手动启用 TCP 模式
-     */
-    suspend fun enableTcpMode(port: Int = 5555): Boolean = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "Manually enabling TCP mode on port $port...")
-            val result = execute("adb tcpip $port")
-            Thread.sleep(2000)
-
-            if (result.success) {
-                Log.d(TAG, "TCP mode enabled successfully")
-                true
-            } else {
-                Log.w(TAG, "Failed to enable TCP mode: ${result.stderr}")
-                false
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error enabling TCP mode", e)
-            false
-        }
-    }
 
     /**
      * 连接到指定 IP 的设备
      */
-    suspend fun connectToDevice(ip: String, port: Int = 5555): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val address = "$ip:$port"
-            Log.d(TAG, "Connecting to device at $address...")
-            val result = execute("adb connect $address")
+    suspend fun connectToDevice(ip: String, port: Int = 5555): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val address = "$ip:$port"
+                Log.d(TAG, "Connecting to device at $address...")
+                val result = executeCommand(listOf("connect", address))
+//            executeADB("devices")
 
-            if (result.success) {
-                Log.d(TAG, "Connected to $address")
-                true
-            } else {
-                Log.w(TAG, "Failed to connect: ${result.stderr}")
+                if (result.success) {
+                    Log.d(TAG, "Connected to $address")
+                    true
+                } else {
+                    Log.w(TAG, "Failed to connect: ${result.stderr}")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error connecting to device", e)
                 false
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error connecting to device", e)
-            false
         }
-    }
 
     /**
      * 断开所有设备连接
@@ -718,7 +584,7 @@ class ShellExecutor(private val context: Context) {
     suspend fun disconnectAll(): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Disconnecting all devices...")
-            val result = execute("adb disconnect")
+            val result = executeADB("disconnect")
             result.success
         } catch (e: Exception) {
             Log.e(TAG, "Error disconnecting devices", e)
@@ -750,6 +616,7 @@ class ShellExecutor(private val context: Context) {
      * 写调试消息 - LADB 的 debug 方法
      */
     fun debug(msg: String) {
+        Log.e("debug", msg)
         synchronized(outputBufferFile) {
             Log.d(TAG, "* $msg")
             if (outputBufferFile.exists()) {
@@ -759,10 +626,10 @@ class ShellExecutor(private val context: Context) {
     }
 
     /**
-     * 检查是否可用
+     * 检查是否可用 - 现在只检查初始化状态
      */
     fun isAvailable(): Boolean {
-        return _running.value == true && shellProcess != null
+        return _running.value == true
     }
 
     /**
@@ -808,12 +675,20 @@ class DnsDiscover private constructor(
     private var bestExpirationTime: Long? = null
     private var bestServiceName: String? = null
 
-    private var pendingServices: MutableList<NsdServiceInfo> = Collections.synchronizedList(ArrayList())
+    private var pendingServices: MutableList<NsdServiceInfo> =
+        Collections.synchronizedList(ArrayList())
 
     companion object {
-        var adbPort: Int? = null
+        var bestAdbPort: Int? = null
+        var adbPorts: ArrayList<Int> = arrayListOf()
         var pendingResolves = AtomicBoolean(false)
         var aliveTime: Long? = null
+
+        // 清理ADB端口列表，防止重复累积
+        fun clearAdbPorts() {
+            adbPorts.clear()
+            Log.d("DnsDiscover", "清理ADB端口列表")
+        }
 
         fun getInstance(context: Context, nsdManager: NsdManager): DnsDiscover {
             return DnsDiscover(context, nsdManager, "DnsDiscover", "_adb-tls-connect._tcp")
@@ -824,6 +699,7 @@ class DnsDiscover private constructor(
      * 扫描 ADB 端口
      */
     fun scanAdbPorts() {
+        clearAdbPorts()
         if (started) {
             Log.w(debugTag, "DNS scan already started")
             return
@@ -847,7 +723,8 @@ class DnsDiscover private constructor(
      * 获取本地 IP 地址
      */
     fun getLocalIpAddress(): String? {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = connectivityManager.activeNetwork ?: return null
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
 
@@ -888,13 +765,13 @@ class DnsDiscover private constructor(
         }
 
         fun update() {
-            adbPort = port
+            bestAdbPort = port
             bestExpirationTime = expirationTime
             bestServiceName = serviceName
-            Log.d(debugTag, "Updated best ADB port: $adbPort")
+            Log.d(debugTag, "Updated best ADB port: $bestAdbPort")
         }
 
-        if (adbPort == null) {
+        if (bestAdbPort == null) {
             update()
             return
         }
@@ -953,7 +830,7 @@ class DnsDiscover private constructor(
             Log.d(debugTag, "Port is zero, skipping...")
             return
         }
-
+        adbPorts.add(serviceInfo.port)
         updateIfNewest(serviceInfo)
     }
 

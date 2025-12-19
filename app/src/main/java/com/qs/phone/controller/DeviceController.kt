@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import android.util.Log
-import com.qs.phone.PhoneAgent
 import com.qs.phone.config.AppPackages
 import com.qs.phone.shell.ShellExecutor
 import com.qs.phone.shell.ShellResult
@@ -18,7 +17,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
-import java.nio.channels.FileChannel
 
 /**
  * ????? - ?? Shell ???? Android ??
@@ -199,12 +197,12 @@ class DeviceController(
             Log.d(TAG, "Taking screenshot via ADB (internal storage)")
 
             // ??????
-            shell.execute("mkdir -p /sdcard/Android/data/${context.packageName}/files")
+            shell.executeShell("mkdir -p /sdcard/Android/data/${context.packageName}/files")
 
             // ??????
             val command = "adb shell screencap -p $screenshotPath"
             Log.d(TAG, "Executing: $command")
-            shell.execute(command)
+            shell.executeShell(command)
 
             // ????????
             val localScreenshotPath = File(screenshotPath)
@@ -352,7 +350,7 @@ class DeviceController(
      */
     suspend fun getCurrentApp(): String {
         // 直接从顶层Activity中查找包名
-        val result = shell.execute("am dumpsys activity top")
+        val result = shell.executeShell("am dumpsys activity top")
         if (result.success) {
             Log.d(TAG, "Activity dump output: ${result.stdout.take(500)}")
 
@@ -391,7 +389,7 @@ class DeviceController(
 
         // 如果获取焦点失败，尝试获取顶层应用
         Log.d(TAG, "Focus detection failed, trying top activity...")
-        val topResult = shell.execute("dumpsys activity top | grep 'ACTIVITY' | grep -v 'mimeType' | tail -1")
+        val topResult = shell.executeShell("dumpsys activity top | grep 'ACTIVITY' | grep -v 'mimeType' | tail -1")
         if (topResult.success && topResult.stdout.isNotEmpty()) {
             Log.d(TAG, "Top activity output: ${topResult.stdout}")
             // 解析顶层Activity的包名
@@ -415,7 +413,7 @@ class DeviceController(
 
         // 最后尝试获取最近运行的应用
         Log.d(TAG, "Top activity detection failed, trying app stack...")
-        val recentResult = shell.execute("am stack list | head -1")
+        val recentResult = shell.executeShell("am stack list | head -1")
         if (recentResult.success && recentResult.stdout.isNotEmpty()) {
             Log.d(TAG, "App stack output: ${recentResult.stdout}")
             // 解析堆栈顶部的包名
@@ -439,7 +437,7 @@ class DeviceController(
 
         // 最后的备用方法：尝试获取正在运行的进程
         Log.d(TAG, "All methods failed, trying to get running processes...")
-        val psResult = shell.execute("ps -A | grep -E 'com\\.' | head -5")
+        val psResult = shell.executeShell("ps -A | grep -E 'com\\.' | head -5")
         if (psResult.success) {
             Log.d(TAG, "Process output: ${psResult.stdout}")
             val lines = psResult.stdout.lines()
@@ -474,7 +472,7 @@ class DeviceController(
      * ??????
      */
     suspend fun tap(x: Int, y: Int) {
-        shell.execute("input tap $x $y")
+        shell.executeShell("input tap $x $y")
         delay(DEFAULT_TAP_DELAY)
     }
 
@@ -482,9 +480,9 @@ class DeviceController(
      * ??
      */
     suspend fun doubleTap(x: Int, y: Int) {
-        shell.execute("input tap $x $y")
+        shell.executeShell("input tap $x $y")
         delay(100)
-        shell.execute("input tap $x $y")
+        shell.executeShell("input tap $x $y")
         delay(DEFAULT_TAP_DELAY)
     }
 
@@ -492,7 +490,7 @@ class DeviceController(
      * ??
      */
     suspend fun longPress(x: Int, y: Int, durationMs: Int = DEFAULT_LONG_PRESS_DURATION) {
-        shell.execute("input swipe $x $y $x $y $durationMs")
+        shell.executeShell("input swipe $x $y $x $y $durationMs")
         delay(DEFAULT_TAP_DELAY)
     }
 
@@ -504,7 +502,7 @@ class DeviceController(
             val distSq = (startX - endX) * (startX - endX) + (startY - endY) * (startY - endY)
             (distSq / 1000).coerceIn(1000, 2000)
         }
-        shell.execute("input swipe $startX $startY $endX $endY $duration")
+        shell.executeShell("input swipe $startX $startY $endX $endY $duration")
         delay(DEFAULT_SWIPE_DELAY)
     }
 
@@ -512,7 +510,7 @@ class DeviceController(
      * ???
      */
     suspend fun back() {
-        shell.execute("input keyevent 4")
+        shell.executeShell("input keyevent 4")
         delay(DEFAULT_TAP_DELAY)
     }
 
@@ -520,7 +518,7 @@ class DeviceController(
      * Home ?
      */
     suspend fun home() {
-        shell.execute("input keyevent KEYCODE_HOME")
+        shell.executeShell("input keyevent KEYCODE_HOME")
         delay(DEFAULT_TAP_DELAY)
     }
 
@@ -613,9 +611,9 @@ class DeviceController(
     suspend fun typeText(text: String) {
         // 使用 am broadcast 方案发送文字，支持中文和多语言
         val escapedText = text.replace("\"", "\\\"")
-        val command = "adb shell am broadcast -a ADB_INPUT_TEXT --es msg '$escapedText'"
+        val command = "am broadcast -a ADB_INPUT_TEXT --es msg '$escapedText'"
         Log.d(TAG, "Executing text input: $command")
-        shell.execute(command)
+        shell.executeShell(command)
         delay(DEFAULT_TAP_DELAY)
     }
 
@@ -625,7 +623,7 @@ class DeviceController(
     suspend fun clearText() {
         // ???????????
         repeat(1) {
-            shell.execute("for i in {1..50}; do input keyevent KEYCODE_DEL; done")
+            shell.executeShell("for i in {1..50}; do input keyevent KEYCODE_DEL; done")
         }
     }
 
@@ -634,7 +632,7 @@ class DeviceController(
      */
     suspend fun launchApp(appName: String): Boolean {
         val packageName = AppPackages.getPackageName(appName) ?: return false
-        shell.execute("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
+        shell.executeShell("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
         delay(DEFAULT_LAUNCH_DELAY)
         return true
     }
@@ -643,7 +641,7 @@ class DeviceController(
      * ??????
      */
     suspend fun getScreenSize(): Pair<Int, Int> {
-        val result = shell.execute("wm size")
+        val result = shell.executeShell("wm size")
         if (result.success) {
             // ?? "Physical size: 1080x2400" ??
             val match = Regex("(\\d+)x(\\d+)").find(result.stdout)

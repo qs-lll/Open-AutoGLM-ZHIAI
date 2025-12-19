@@ -1,12 +1,9 @@
 package com.qs.phone
 
-import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
@@ -20,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.qs.phone.service.FloatingWindowService
 import com.qs.phone.shell.ShellExecutor
+import com.qs.phone.shell.DnsDiscover
 import com.qs.phone.ui.DiagnosticTool
 import com.qs.phone.ui.ErrorDialog
 import com.qs.phone.util.NativeLibraryLoader
@@ -27,8 +25,11 @@ import com.qs.phone.util.PermissionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
+import android.util.Log
+import android.content.Context
 
 class MainActivity : AppCompatActivity() {
 
@@ -41,7 +42,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var saveButton: Button
     private lateinit var ladbStatusText: TextView
     private lateinit var ladbHelpButton: Button
-    private lateinit var enableTcpButton: Button
+    private lateinit var dnsConnectButton: Button
     private lateinit var connectButton: Button
     private lateinit var disconnectButton: Button
     private lateinit var listDevicesButton: Button
@@ -58,6 +59,11 @@ class MainActivity : AppCompatActivity() {
 
     private val mainScope = CoroutineScope(Dispatchers.Main)
     private val shellExecutor by lazy { ShellExecutor(this@MainActivity) }
+
+    // DNS连接相关变量
+    private var dnsSearchJob: kotlinx.coroutines.Job? = null
+    private var isDnsSearching = false
+    private var dnsDiscover: DnsDiscover? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,7 +94,7 @@ class MainActivity : AppCompatActivity() {
         saveButton = findViewById(R.id.saveButton)
         ladbStatusText = findViewById(R.id.ladbStatusText)
         ladbHelpButton = findViewById(R.id.ladbHelpButton)
-        enableTcpButton = findViewById(R.id.enableTcpButton)
+        dnsConnectButton = findViewById(R.id.dnsConnectButton)
         connectButton = findViewById(R.id.connectButton)
         disconnectButton = findViewById(R.id.disconnectButton)
         listDevicesButton = findViewById(R.id.listDevicesButton)
@@ -134,21 +140,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        enableTcpButton.setOnClickListener {
-            mainScope.launch {
-                try {
-                    val shell = shellExecutor
-                    val success = shell.enableTcpMode(5555)
-                    Toast.makeText(
-                        this@MainActivity,
-                        if (success) "TCP 模式已启用" else "启用 TCP 模式失败",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    checkLadbStatus()
-                } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "错误: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            }
+        dnsConnectButton.setOnClickListener {
+            showDnsConnectionDialog()
         }
 
         connectButton.setOnClickListener {
@@ -163,7 +156,8 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                     checkLadbStatus()
                 } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "错误: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "错误: ${e.message}", Toast.LENGTH_SHORT)
+                        .show()
                 }
             }
         }
@@ -180,7 +174,8 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                     checkLadbStatus()
                 } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "错误: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "错误: ${e.message}", Toast.LENGTH_SHORT)
+                        .show()
                 }
             }
         }
@@ -209,7 +204,11 @@ class MainActivity : AppCompatActivity() {
                     // 更新状态显示
                     checkLadbStatus()
                 } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "列出设备失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "列出设备失败: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }
@@ -232,7 +231,8 @@ class MainActivity : AppCompatActivity() {
                         }
                         .show()
                 } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "诊断失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "诊断失败: ${e.message}", Toast.LENGTH_SHORT)
+                        .show()
                 }
             }
         }
@@ -310,26 +310,32 @@ class MainActivity : AppCompatActivity() {
                 ladbStatusText.text = status
 
                 // 显示/隐藏帮助按钮
-                ladbHelpButton.visibility = if (ladbAvailable) android.view.View.GONE else android.view.View.VISIBLE
+                ladbHelpButton.visibility =
+                    if (ladbAvailable) android.view.View.GONE else android.view.View.VISIBLE
 
                 // 启用/禁用按钮 - 只有库文件存在时才允许操作
                 val enableControls = ladbAvailable
-                enableTcpButton.isEnabled = enableControls
+                val hasNetworkPermission =
+                    checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                dnsConnectButton.isEnabled =
+                    enableControls && !isDnsSearching && hasNetworkPermission
                 connectButton.isEnabled = enableControls
                 disconnectButton.isEnabled = enableControls
                 listDevicesButton.isEnabled = enableControls
                 diagnosticButton.isEnabled = true  // 诊断按钮总是启用
 
                 if (!ladbAvailable) {
-                    enableTcpButton.text = "需要 LADB 或 Root"
+                    dnsConnectButton.text = "需要 LADB 或 Root"
                     connectButton.text = "需要 LADB 或 Root"
                     disconnectButton.text = "需要 LADB 或 Root"
                     listDevicesButton.text = "需要 LADB 或 Root"
+                } else if (!hasNetworkPermission) {
+                    dnsConnectButton.text = "需要网络权限"
+                }
 
-                    // 如果 LADB 不可用，显示诊断提示
-                    if (!usbEnabled) {
-                        ladbStatusText.text = status + "\n\n⚠️ 请先在开发者选项中启用调试模式"
-                    }
+                // 如果 LADB 不可用，显示诊断提示
+                if (!usbEnabled) {
+                    ladbStatusText.text = status + "\n\n⚠️ 请先在开发者选项中启用调试模式"
                 }
             } catch (e: Exception) {
                 ladbStatusText.text = "状态检查失败: ${e.message}"
@@ -355,9 +361,11 @@ class MainActivity : AppCompatActivity() {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
                     append("需要权限：READ_MEDIA_IMAGES\n")
                 }
+
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
                     append("需要权限：READ_EXTERNAL_STORAGE\n")
                 }
+
                 else -> {
                     append("需要权限：WRITE_EXTERNAL_STORAGE\n")
                     append("需要权限：READ_EXTERNAL_STORAGE\n")
@@ -405,9 +413,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncConfigToService() {
-        FloatingWindowService.baseUrl = prefs.getString("base_url", "http://localhost:8000/v1") ?: "http://localhost:8000/v1"
+        FloatingWindowService.baseUrl =
+            prefs.getString("base_url", "http://localhost:8000/v1") ?: "http://localhost:8000/v1"
         FloatingWindowService.apiKey = prefs.getString("api_key", "EMPTY") ?: "EMPTY"
-        FloatingWindowService.modelName = prefs.getString("model_name", "autoglm-phone-9b") ?: "autoglm-phone-9b"
+        FloatingWindowService.modelName =
+            prefs.getString("model_name", "autoglm-phone-9b") ?: "autoglm-phone-9b"
     }
 
     private fun updateServiceStatus() {
@@ -452,19 +462,20 @@ class MainActivity : AppCompatActivity() {
             try {
                 Toast.makeText(this@MainActivity, "正在截图...", Toast.LENGTH_SHORT).show()
 
-                // 确保 LADB 已初始化
+//                // 确保 LADB 已初始化
                 val shell = shellExecutor
-                if (!shell.isLadbLibraryAvailable()) {
-                    Toast.makeText(this@MainActivity, "LADB 库不可用", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
 
-                // 初始化 LADB
-                val initSuccess = shell.initServer()
-                if (!initSuccess) {
-                    Toast.makeText(this@MainActivity, "LADB 初始化失败", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
+//                if (!shell.isLadbLibraryAvailable()) {
+//                    Toast.makeText(this@MainActivity, "LADB 库不可用", Toast.LENGTH_SHORT).show()
+//                    return@launch
+//                }
+
+//                // 初始化 LADB
+//                val initSuccess = shell.initServer()
+//                if (!initSuccess) {
+//                    Toast.makeText(this@MainActivity, "LADB 初始化失败", Toast.LENGTH_SHORT).show()
+//                    return@launch
+//                }
 
                 // 创建截图目录
                 val screenshotDir = File(getExternalFilesDir(null), "screenshots")
@@ -477,29 +488,38 @@ class MainActivity : AppCompatActivity() {
                 val localPath = File(remotePath)
 
                 // 执行截图命令
-                val result = shell.execute("adb shell screencap -p $remotePath")
+                val result = shell.executeShell("screencap -p $remotePath")
                 if (!result.success) {
-                    Toast.makeText(this@MainActivity, "截图失败: ${result.stderr}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "截图失败: ${result.stderr}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                     return@launch
                 }
 
                 // 等待一下让截图完成
-                kotlinx.coroutines.delay(500)
+//                kotlinx.coroutines.delay(500)
 
                 // 从设备拉取截图
                 if (localPath.exists() && localPath.length() > 0) {
                     // 显示截图 dialog
                     showScreenshotDialog(localPath.absolutePath)
-                    Toast.makeText(this@MainActivity, "截图成功！保存到: ${localPath.absolutePath}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "截图成功！保存到: ${localPath.absolutePath}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 } else {
                     Toast.makeText(this@MainActivity, "拉取截图失败", Toast.LENGTH_SHORT).show()
                 }
 
                 // 用完即删
-                shell.execute("adb shell rm $remotePath")
+//                shell.execute("adb shell rm $remotePath")
 
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "截图测试失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "截图测试失败: ${e.message}", Toast.LENGTH_SHORT)
+                    .show()
                 e.printStackTrace()
             }
         }
@@ -519,7 +539,12 @@ class MainActivity : AppCompatActivity() {
             if (bitmap != null) {
                 imageView.setImageBitmap(bitmap)
             } else {
-                imageView.setImageDrawable(ContextCompat.getDrawable(this, android.R.drawable.ic_dialog_alert))
+                imageView.setImageDrawable(
+                    ContextCompat.getDrawable(
+                        this,
+                        android.R.drawable.ic_dialog_alert
+                    )
+                )
             }
 
             // 创建 dialog
@@ -586,7 +611,217 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
-        val granted = PermissionManager.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        val granted =
+            PermissionManager.onRequestPermissionsResult(requestCode, permissions, grantResults)
         updatePermissionStatus()
+    }
+
+    /**
+     * 显示DNS连接对话框
+     */
+    private fun showDnsConnectionDialog() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_dns_connection, null)
+        val statusText = dialogView.findViewById<TextView>(R.id.dnsStatusText)
+        val cancelButton = dialogView.findViewById<Button>(R.id.dnsCancelButton)
+
+        // 创建对话框
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("DNS 无线调试连接")
+            .setView(dialogView)
+            .setCancelable(false)  // 默认不可取消，除非用户点击取消按钮
+            .create()
+
+        // 开始DNS搜索
+        startDnsSearch(statusText, dialog, cancelButton)
+
+        // 取消按钮点击事件
+        cancelButton.setOnClickListener {
+            stopDnsSearch()
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    /**
+     * 开始DNS搜索设备（按照LADB完整初始化流程）
+     */
+    private fun startDnsSearch(statusText: TextView, dialog: AlertDialog, cancelButton: Button) {
+        isDnsSearching = true
+        dnsConnectButton.text = "搜索中..."
+        dnsConnectButton.isEnabled = false
+        cancelButton.isEnabled = true
+
+        dnsSearchJob = mainScope.launch {
+            try {
+                // 检查网络状态权限
+                if (checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    statusText.text = "❌ 缺少网络状态权限\n\n请授予权限后重试"
+                    delay(3000)
+                    dialog.dismiss()
+                    return@launch
+                }
+
+                statusText.text = "🔄 正在初始化ADB服务..."
+                statusText.append("\n\n请确保已开启无线调试")
+
+                // 完全按照LADB的initServer方式实现
+                val shell = shellExecutor
+                if (!shell.isLadbLibraryAvailable()) {
+                    statusText.text = "❌ LADB 库不可用\n\n请确保应用权限正常"
+                    return@launch
+                }
+
+                // 按照LADB方式执行完整初始化
+                val success = performLadbDnsConnection(shell, statusText)
+
+                if (success) {
+                    val devices = shell.getDevices()
+                    statusText.text = "✅ DNS连接成功！\n\n发现设备:\n${devices.joinToString("\n")}"
+                    checkLadbStatus()
+                } else {
+                    statusText.text =
+                        "❌ DNS连接失败\n\n请确保：\n• 无线调试已开启\n• 已配对本机设备\n• 网络连接正常"
+                }
+
+            } catch (e: Exception) {
+                Log.e("MainActivity", "DNS search error", e)
+                statusText.text = "❌ 连接过程中发生错误\n\n${e.message}"
+            } finally {
+                // 重置状态
+                isDnsSearching = false
+                dnsDiscover = null
+
+                runOnUiThread {
+                    dnsConnectButton.text = "DNS 连接无线调试"
+                    dnsConnectButton.isEnabled =
+                        shellExecutor.isLadbLibraryAvailable() && !isDnsSearching
+                }
+
+                // 3秒后自动关闭对话框
+                delay(3000)
+                dialog.dismiss()
+            }
+        }
+    }
+
+    /**
+     * 按照LADB方式执行DNS连接
+     */
+    private suspend fun performLadbDnsConnection(
+        shell: ShellExecutor,
+        statusText: TextView
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            // 更新UI必须在主线程
+            runOnUiThread { statusText.text = "🔄 启动DNS服务发现..." }
+
+            // 获取NSD管理器并开始DNS发现
+            val nsdManager = getSystemService(Context.NSD_SERVICE) as android.net.nsd.NsdManager
+            dnsDiscover = DnsDiscover.getInstance(this@MainActivity, nsdManager)
+
+            // 重置静态变量
+            DnsDiscover.bestAdbPort = null
+            DnsDiscover.pendingResolves.set(false)
+            DnsDiscover.aliveTime = System.currentTimeMillis()
+
+            // 开始扫描
+            dnsDiscover?.scanAdbPorts()
+
+            runOnUiThread { statusText.text = "🔍 搜索无线调试服务..." }
+
+            // 等待DNS解析完成（按照LADB的等待逻辑）
+            val nowTime = System.currentTimeMillis()
+            val maxTimeoutTime = nowTime + 10000 // 10秒超时
+            val minDnsScanTime = (DnsDiscover.aliveTime ?: nowTime) + 3000 // 最少3秒
+
+            var dnsWaitCount = 0
+            while (true) {
+                if (!isDnsSearching) break
+
+                val currentTime = System.currentTimeMillis()
+                val pendingResolves = DnsDiscover.pendingResolves.get()
+
+                // 更新UI状态 - 必须在主线程
+                val elapsedSeconds = (currentTime - nowTime) / 1000
+                runOnUiThread {
+                    statusText.text =
+                        "🔍 搜索无线调试服务 (${elapsedSeconds}s)...\n\n⏳ 正在发现ADB端口"
+                }
+
+                if (currentTime >= minDnsScanTime && !pendingResolves) {
+                    runOnUiThread { statusText.text = "✅ DNS解析完成" }
+                    break
+                }
+
+                if (currentTime >= maxTimeoutTime) {
+                    runOnUiThread { statusText.text = "⚠️ DNS发现超时" }
+                    break
+                }
+
+                Thread.sleep(1000)
+                dnsWaitCount++
+                if (dnsWaitCount >= 30) break
+            }
+
+            val adbPort = DnsDiscover.bestAdbPort
+            Log.e("ports", DnsDiscover.adbPorts.toString())
+            if (adbPort != null) {
+                runOnUiThread {
+                    statusText.text = "✅ 发现ADB端口: $adbPort\n\n正在启动ADB服务器..."
+                }
+
+//                // 按照LADB方式：启动ADB服务器
+//                shell.executeADB("adb start-server")
+//                Thread.sleep(2000)
+
+
+                // 连接到发现的端口s   只要有一个成功连接那么就可以了
+                var connected = false
+                for (port in DnsDiscover.adbPorts) {
+                    runOnUiThread { statusText.text = "🔄 正在连接到 localhost:$port..." }
+                    Log.e("在连接到 local  ","ports"+port+"")
+                    connected = connected || shell.connectToDevice("localhost", port)
+                }
+                if (connected) {
+                    return@withContext true
+                }
+            } else {
+                runOnUiThread { statusText.text = "❌ 未发现ADB端口\n\n尝试默认连接方式..." }
+
+//                // 回退到LADB的默认方式：wait-for-device
+//                shell.executeADB("adb start-server")
+//                Thread.sleep(2000)
+
+                runOnUiThread { statusText.text = "🔄 等待设备连接..." }
+                val devices = shell.getDevices()
+                return@withContext devices.isNotEmpty()
+            }
+
+            return@withContext false
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Ladb DNS connection failed", e)
+            runOnUiThread { statusText.text = "❌ 连接失败: ${e.message}" }
+            return@withContext false
+        }
+    }
+
+    /**
+     * 停止DNS搜索
+     */
+    private fun stopDnsSearch() {
+        isDnsSearching = false
+        dnsSearchJob?.cancel()
+        dnsSearchJob = null
+
+        dnsConnectButton.text = "DNS 连接无线调试"
+        dnsConnectButton.isEnabled = shellExecutor.isLadbLibraryAvailable()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // 清理协程，避免内存泄漏
+        dnsSearchJob?.cancel()
+        dnsSearchJob = null
     }
 }
