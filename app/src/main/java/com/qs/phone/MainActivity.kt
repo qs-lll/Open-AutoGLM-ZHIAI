@@ -781,7 +781,7 @@ class MainActivity : AppCompatActivity() {
                 for (port in DnsDiscover.adbPorts) {
                     runOnUiThread { statusText.text = "🔄 正在连接到 localhost:$port..." }
                     Log.e("在连接到 local  ","ports"+port+"")
-                    connected = connected || shell.connectToDevice("localhost", port)
+                    connected = connected or shell.connectToDevice("localhost", port)
                 }
                 if (connected) {
                     return@withContext true
