@@ -205,7 +205,8 @@ class DeviceController(
             shell.executeShell(command)
 
             // ????????
-            val localScreenshotPath = File(screenshotPath)
+            var localScreenshotPath =  File(context.getExternalFilesDir(""), "screenshot_${timestamp}.png")
+
             var count = 0
             var fileExists = false
 
