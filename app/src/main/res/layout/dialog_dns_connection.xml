@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/dnsStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="正在准备搜索..."
+        android:textSize="14sp"
+        android:layout_marginBottom="16dp"
+        android:fontFamily="monospace" />
+
+    <ProgressBar
+        android:id="@+id/dnsProgressBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/dnsCancelButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="取消搜索"
+        style="@style/Widget.Material3.Button.TonalButton" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="💡 提示：DNS 搜索会自动发现同一网络下的无线调试设备\n\n确保目标设备已开启无线调试并配对"
+        android:textSize="12sp"
+        android:textColor="@android:color/darker_gray"
+        android:layout_marginTop="12dp" />
+
+</LinearLayout>

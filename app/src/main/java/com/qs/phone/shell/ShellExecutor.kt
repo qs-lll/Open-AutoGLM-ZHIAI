@@ -164,42 +164,6 @@ class ShellExecutor(private val context: Context) {
         }
     }
 
-    /**
-     * 配对功能（Android 11+）
-     */
-    suspend fun pair(port: String, pairingCode: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            debug("Pairing to port $port with code $pairingCode...")
-            val pairShell = createAdbProcess(listOf("pair", "localhost:$port"))
-
-            Thread.sleep(5000)
-
-            PrintStream(pairShell.outputStream).apply {
-                println(pairingCode)
-                flush()
-            }
-
-            val success = pairShell.waitFor(10, TimeUnit.SECONDS)
-            pairShell.destroyForcibly().waitFor()
-
-            // 清理服务
-            val killShell = createAdbProcess(listOf("kill-server"))
-            killShell.waitFor(3, TimeUnit.SECONDS)
-            killShell.destroyForcibly()
-
-            val result = pairShell.exitValue() == 0
-            if (result) {
-                debug("Pairing successful!")
-            } else {
-                debug("Pairing failed!")
-            }
-            result
-        } catch (e: Exception) {
-            Log.e(TAG, "Pairing failed", e)
-            debug("Pairing failed: ${e.message}")
-            false
-        }
-    }
 
     /**
      * 连接到指定设备
