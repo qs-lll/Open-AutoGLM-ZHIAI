@@ -20,9 +20,9 @@ import java.util.concurrent.TimeUnit
  * 模型配置
  */
 data class ModelConfig(
-    val baseUrl: String = "http://localhost:8000/v1",
+    val baseUrl: String = "https://open.bigmodel.cn/api/paas/v4",
     val apiKey: String = "EMPTY",
-    val modelName: String = "autoglm-phone-9b",
+    val modelName: String = "autoglm-phone",
     val maxTokens: Int = 3000,
     val temperature: Float = 0.0f,
     val topP: Float = 0.85f

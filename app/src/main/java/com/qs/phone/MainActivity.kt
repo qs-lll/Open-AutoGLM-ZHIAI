@@ -107,9 +107,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadConfig() {
-        baseUrlInput.setText(prefs.getString("base_url", "http://localhost:8000/v1"))
+        baseUrlInput.setText(prefs.getString("base_url", "https://open.bigmodel.cn/api/paas/v4"))
         apiKeyInput.setText(prefs.getString("api_key", "EMPTY"))
-        modelNameInput.setText(prefs.getString("model_name", "autoglm-phone-9b"))
+        modelNameInput.setText(prefs.getString("model_name", "autoglm-phone"))
 
         // 同步到服务
         syncConfigToService()
@@ -414,10 +414,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncConfigToService() {
         FloatingWindowService.baseUrl =
-            prefs.getString("base_url", "http://localhost:8000/v1") ?: "http://localhost:8000/v1"
+            prefs.getString("base_url", "https://open.bigmodel.cn/api/paas/v4") ?: "https://open.bigmodel.cn/api/paas/v4"
         FloatingWindowService.apiKey = prefs.getString("api_key", "EMPTY") ?: "EMPTY"
         FloatingWindowService.modelName =
-            prefs.getString("model_name", "autoglm-phone-9b") ?: "autoglm-phone-9b"
+            prefs.getString("model_name", "autoglm-phone") ?: "autoglm-phone"
     }
 
     private fun updateServiceStatus() {

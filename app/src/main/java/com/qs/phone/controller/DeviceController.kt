@@ -197,10 +197,10 @@ class DeviceController(
             Log.d(TAG, "Taking screenshot via ADB (internal storage)")
 
             // ??????
-            shell.executeShell("mkdir -p /sdcard/Android/data/${context.packageName}/files")
+//            shell.executeShell("mkdir -p /sdcard/Android/data/${context.packageName}/files")
 
             // ??????
-            val command = "adb shell screencap -p $screenshotPath"
+            val command = "screencap -p $screenshotPath"
             Log.d(TAG, "Executing: $command")
             shell.executeShell(command)
 

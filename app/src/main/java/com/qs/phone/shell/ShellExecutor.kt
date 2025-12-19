@@ -136,8 +136,10 @@ class ShellExecutor(private val context: Context) {
             val stderr = BufferedReader(process.errorStream.reader()).readText()
             val exitCode = if (completed) process.exitValue() else -1
 
-            Log.d(TAG, "Command completed: $command")
+            Log.d(TAG, "Command : $command")
             Log.d(TAG, "Exit code: $exitCode")
+            Log.e(TAG, "stderr: $stderr")
+            Log.d(TAG, "stderr: $stdout")
 
             ShellResult(
                 success = exitCode == 0,

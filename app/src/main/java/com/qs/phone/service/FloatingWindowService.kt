@@ -53,9 +53,9 @@ class FloatingWindowService : AccessibilityService() {
             private set
 
         // 配置
-        var baseUrl = "http://localhost:8000/v1"
+        var baseUrl = "https://open.bigmodel.cn/api/paas/v4"
         var apiKey = "EMPTY"
-        var modelName = "autoglm-phone-9b"
+        var modelName = "autoglm-phone"
     }
 
     private var windowManager: WindowManager? = null
