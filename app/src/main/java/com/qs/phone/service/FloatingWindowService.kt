@@ -113,7 +113,7 @@ class FloatingWindowService : AccessibilityService() {
                     AccessibilityEvent.TYPE_VIEW_FOCUSED
                 )) {
                 lastAccessibilityEvent = it
-                Log.d(TAG, "Saved accessibility event for package: ${it.packageName}")
+//                Log.d(TAG, "Saved accessibility event for package: ${it.packageName}")
             }
         }
     }
@@ -427,12 +427,14 @@ class FloatingWindowService : AccessibilityService() {
                         agent?.state?.collectLatest { state ->
                             when (state) {
                                 is AgentState.Running -> {
+                                    showWidgetInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = true
                                     updateStatusIndicator(true)
                                 }
 
                                 is AgentState.Completed -> {
+                                    showMainInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = false
                                     updateStatusIndicator(false)
@@ -440,6 +442,7 @@ class FloatingWindowService : AccessibilityService() {
                                 }
 
                                 is AgentState.Error -> {
+                                    showMainInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = false
                                     updateStatusIndicator(false)
@@ -447,6 +450,7 @@ class FloatingWindowService : AccessibilityService() {
                                 }
 
                                 is AgentState.Idle -> {
+                                    showMainInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = false
                                     updateStatusIndicator(false)

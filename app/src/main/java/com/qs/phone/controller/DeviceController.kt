@@ -39,6 +39,64 @@ class DeviceController(
     private val appDetector by lazy { AppDetector(context) }
 
     /**
+     * 压缩Bitmap到指定文件大小以内
+     * @param bitmap 原始图片
+     * @param maxSizeBytes 最大文件大小（字节）
+     * @return 压缩后的输出流
+     */
+    private fun compressBitmapToSize(bitmap: Bitmap, maxSizeBytes: Int): ByteArrayOutputStream {
+        // 1. 先进行尺寸压缩
+        val width = bitmap.width
+        val height = bitmap.height
+        val maxSize = 1080 // 最大尺寸
+
+        val scaleRatio = minOf(
+            maxSize.toFloat() / width,
+            maxSize.toFloat() / height,
+            1.0f
+        ).coerceIn(0.1f, 1.0f)
+
+        val scaledWidth = (width * scaleRatio).toInt()
+        val scaledHeight = (height * scaleRatio).toInt()
+
+        val scaledBitmap = if (scaleRatio < 1.0f) {
+            Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true)
+        } else {
+            bitmap
+        }
+
+        // 2. 渐进式质量压缩，直到满足大小要求
+        var quality = 90
+        var outputStream: ByteArrayOutputStream
+
+        while (quality > 10) {
+            outputStream = ByteArrayOutputStream()
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+
+            if (outputStream.size() <= maxSizeBytes) {
+                // 如果创建了新的bitmap，回收它
+                if (scaledBitmap != bitmap) {
+                    scaledBitmap.recycle()
+                }
+                return outputStream
+            }
+
+            quality -= 10
+        }
+
+        // 最后的兜底压缩
+        outputStream = ByteArrayOutputStream()
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 10, outputStream)
+
+        // 如果创建了新的bitmap，回收它
+        if (scaledBitmap != bitmap) {
+            scaledBitmap.recycle()
+        }
+
+        return outputStream
+    }
+
+    /**
      * 判断文件是否处于写入/加载中（非最终完成状态）
      * @param file 图片文件
      * @return true=加载中/写入中，false=已完成
@@ -244,37 +302,27 @@ class DeviceController(
                 return takeScreenshotViaAdbExecOut()
             }
 
-            // ??????? - ?? IO ????????
-            val fileBytes = try {
-                withContext(Dispatchers.IO) {
-                    localScreenshotPath.readBytes()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to read screenshot file", e)
-                return takeScreenshotViaAdbExecOut()
-            }
-
-            if (fileBytes.isEmpty()) {
-                Log.e(TAG, "Failed to read screenshot file")
-                return  takeScreenshotViaAdbExecOut()
-            }
 
             // ???????? Bitmap
-            val bitmap = BitmapFactory.decodeByteArray(fileBytes, 0, fileBytes.size)
+            val bitmap = BitmapFactory.decodeFile(localScreenshotPath.absolutePath)
 
             if (bitmap != null) {
                 val width = bitmap.width
                 val height = bitmap.height
-                val outputStream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+
+                // 压缩图片 - 控制在500KB以内
+                val outputStream = compressBitmapToSize(bitmap, 500 * 1024)
                 val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
-                Log.d(TAG, "Screenshot decoded successfully: ${width}x${height}")
+                Log.d(TAG, "Screenshot decoded and compressed successfully: ${width}x${height} -> ${outputStream.size()} bytes")
 
                 // ?????????
 
 
-                ScreenshotResult(bitmap, base64, width, height)
+                // 回收原始bitmap以节省内存
+                bitmap.recycle()
+
+                ScreenshotResult(null, base64, width, height)
             } else {
                 Log.e(TAG, "Failed to decode PNG data")
                 takeScreenshotViaAdbExecOut()
@@ -325,11 +373,15 @@ class DeviceController(
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
             if (bitmap != null) {
-                val outputStream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                // 压缩图片 - 控制在500KB以内
+                val outputStream = compressBitmapToSize(bitmap, 500 * 1024)
                 val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
-                Log.d(TAG, "Screenshot decoded successfully: ${bitmap.width}x${bitmap.height}")
-                ScreenshotResult(bitmap, base64, bitmap.width, bitmap.height)
+                Log.d(TAG, "Screenshot decoded and compressed successfully: ${bitmap.width}x${bitmap.height} -> ${outputStream.size()} bytes")
+
+                // 回收bitmap以节省内存
+                bitmap.recycle()
+
+                ScreenshotResult(null, base64, bitmap.width, bitmap.height)
             } else {
                 Log.e(TAG, "BitmapFactory.decodeByteArray returned null")
                 ScreenshotResult(null, null, 0, 0)
