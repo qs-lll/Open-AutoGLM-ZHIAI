@@ -90,6 +90,7 @@
                 android:layout_height="56dp"
                 android:layout_marginBottom="16dp"
                 android:hint="输入任务指令..."
+                android:text="打开抖音刷10条视频"
                 android:textSize="16sp"
                 android:padding="16dp"
                 android:background="@drawable/rounded_input_bg"

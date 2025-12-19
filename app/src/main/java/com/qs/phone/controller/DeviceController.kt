@@ -329,7 +329,7 @@ class DeviceController(
             }
         } catch (e: Exception) {
             Log.e(TAG, "ADB screenshot failed", e)
-            takeScreenshotViaAdbExecOut()
+            ScreenshotResult(null, null, 100, 100)
         } finally {
             // 清理当前截图文件
             try {
