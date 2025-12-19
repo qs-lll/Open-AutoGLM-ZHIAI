@@ -14,6 +14,9 @@ import com.qs.phone.model.ModelConfig
 import com.qs.phone.service.FloatingWindowService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Agent 配置
@@ -75,6 +78,8 @@ class PhoneAgent(
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs
 
+    private val mainScope = CoroutineScope(Dispatchers.Main)
+
     /**
      * 初始化 Agent
      */
@@ -111,6 +116,19 @@ class PhoneAgent(
 
         log("📋 开始任务: $task")
 
+        // 切换到 ADBKeyboard 输入法
+        try {
+            log("⌨️ 切换到 ADBKeyboard...")
+            val inputMethodSwitched = deviceController.switchToADBKeyboard()
+            if (inputMethodSwitched) {
+                log("✅ 已切换到 ADBKeyboard")
+            } else {
+                log("⚠️ ADBKeyboard 切换失败，将使用备用输入方案")
+            }
+        } catch (e: Exception) {
+            log("⚠️ 输入法切换失败: ${e.message}")
+        }
+
         try {
             // 第一步
             var result = executeStep(task, isFirst = true)
@@ -125,6 +143,8 @@ class PhoneAgent(
                     _state.value = AgentState.Completed(message)
                     cleanupScreenshotsOnSuccess()
                 }
+                // 恢复原有输入法
+                restoreInputMethod()
                 return message
             }
 
@@ -142,6 +162,8 @@ class PhoneAgent(
                         _state.value = AgentState.Completed(message)
                         cleanupScreenshotsOnSuccess()
                     }
+                    // 恢复原有输入法
+                    restoreInputMethod()
                     return message
                 }
             }
@@ -149,12 +171,16 @@ class PhoneAgent(
             val message = "达到最大步数限制"
             _state.value = AgentState.Error(message)
             cleanupScreenshotsOnError()
+            // 恢复原有输入法
+            restoreInputMethod()
             return message
         } catch (e: Exception) {
             Log.e(TAG, "Task execution failed", e)
             val message = "任务执行异常: ${e.message}"
             _state.value = AgentState.Error(message)
             cleanupScreenshotsOnError()
+            // 恢复原有输入法
+            restoreInputMethod()
             return message
         }
     }
@@ -273,6 +299,14 @@ class PhoneAgent(
     fun stop() {
         _state.value = AgentState.Idle
         log("⏹️ 已停止")
+        // 恢复原有输入法
+        mainScope.launch {
+            try {
+                restoreInputMethod()
+            } catch (e: Exception) {
+                log("⚠️ 停止时恢复输入法失败: ${e.message}")
+            }
+        }
         // 停止时清理截图文件
         deviceController.cleanupScreenshots()
     }
@@ -325,5 +359,22 @@ class PhoneAgent(
     private fun log(message: String) {
         Log.d(TAG, message)
         _logs.value = _logs.value + message
+    }
+
+    /**
+     * 恢复原有输入法
+     */
+    private suspend fun restoreInputMethod() {
+        try {
+            log("⌨️ 恢复原有输入法...")
+            val restored = deviceController.restoreOriginalInputMethod()
+            if (restored) {
+                log("✅ 已恢复原有输入法")
+            } else {
+                log("⚠️ 恢复输入法失败")
+            }
+        } catch (e: Exception) {
+            log("⚠️ 恢复输入法时发生异常: ${e.message}")
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.qs.phone.action
 
+import android.util.Log
 import com.qs.phone.controller.DeviceController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.GlobalScope
@@ -191,7 +192,15 @@ class ActionHandler(
         val text = action["text"] as? String ?: ""
         deviceController.clearText()
         delay(200)
-        deviceController.typeText(text)
+
+        // 使用改进的文本输入方法（支持 ADBKeyboard 和中文输入）
+        val inputSuccess = deviceController.typeTextImproved(text)
+        if (!inputSuccess) {
+            // 如果改进方法失败，回退到原有方法
+            Log.w("ActionHandler", "改进的文本输入失败，回退到原有方法")
+            deviceController.typeText(text)
+        }
+
         return ActionResult(true, false)
     }
 

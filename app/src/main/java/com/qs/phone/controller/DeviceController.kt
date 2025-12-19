@@ -16,6 +16,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 
 /**
@@ -37,6 +38,9 @@ class DeviceController(
 
     // 应用检测器（不使用 ADB）
     private val appDetector by lazy { AppDetector(context) }
+
+    // 保存原有输入法ID
+    private var originalInputMethod: String? = null
 
     /**
      * 压缩Bitmap到指定文件大小以内
@@ -739,6 +743,300 @@ class DeviceController(
      */
     fun cleanup() {
         shell.cleanup()
+    }
+
+    // ==================== 输入法管理功能 ====================
+
+    /**
+     * 安装 ADBKeyboard APK
+     * @return 安装是否成功
+     */
+    suspend fun installADBKeyboard(): Boolean {
+        return try {
+            Log.d(TAG, "开始安装 ADBKeyboard...")
+
+            // 检查是否已经安装
+            if (isADBKeyboardInstalled()) {
+                Log.d(TAG, "ADBKeyboard 已安装")
+                return true
+            }
+
+            // 从 assets 复制 APK 到临时文件
+            val tempApkFile = copyADBKeyboardToTemp()
+            if (tempApkFile == null) {
+                Log.e(TAG, "复制 ADBKeyboard.apk 失败")
+                return false
+            }
+
+            try {
+                // 安装 APK
+                val installCommand = "pm install -r ${tempApkFile.absolutePath}"
+                Log.d(TAG, "执行安装命令: $installCommand")
+                val result = shell.executeShell(installCommand)
+
+                if (result.success) {
+                    Log.d(TAG, "ADBKeyboard 安装成功")
+                    // 删除临时文件
+                    tempApkFile.delete()
+                    return true
+                } else {
+                    Log.e(TAG, "ADBKeyboard 安装失败: ${result.stderr}")
+                    return false
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "安装 ADBKeyboard 时发生异常", e)
+                return false
+            } finally {
+                // 确保删除临时文件
+                try {
+                    tempApkFile.delete()
+                } catch (e: Exception) {
+                    Log.w(TAG, "删除临时文件失败", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "安装 ADBKeyboard 失败", e)
+            false
+        }
+    }
+
+    /**
+     * 检查 ADBKeyboard 是否已安装
+     */
+    suspend fun isADBKeyboardInstalled(): Boolean {
+        return try {
+            val result = shell.executeShell("pm list packages | grep com.android.adbkeyboard")
+            result.success && result.stdout.contains("com.android.adbkeyboard")
+        } catch (e: Exception) {
+            Log.e(TAG, "检查 ADBKeyboard 安装状态失败", e)
+            false
+        }
+    }
+
+    /**
+     * 从 assets 复制 ADBKeyboard.apk 到临时文件
+     */
+    private fun copyADBKeyboardToTemp(): File? {
+        return try {
+            // 打开 assets 中的 APK 文件
+            val inputStream = context.assets.open("ADBKeyboard.apk")
+            val tempFile = File(context.cacheDir, "ADBKeyboard_temp.apk")
+
+            // 复制文件
+            FileOutputStream(tempFile).use { outputStream ->
+                inputStream.copyTo(outputStream)
+            }
+
+            inputStream.close()
+            Log.d(TAG, "ADBKeyboard.apk 已复制到: ${tempFile.absolutePath}")
+            tempFile
+        } catch (e: Exception) {
+            Log.e(TAG, "复制 ADBKeyboard.apk 失败", e)
+            null
+        }
+    }
+
+    /**
+     * 获取当前输入法
+     */
+    suspend fun getCurrentInputMethod(): String? {
+        return try {
+            val result = shell.executeShell("ime list -s | head -1")
+            if (result.success && result.stdout.isNotBlank()) {
+                val currentIme = result.stdout.trim()
+                Log.d(TAG, "当前输入法: $currentIme")
+                currentIme
+            } else {
+                // 备用方法：获取默认输入法
+                val defaultResult = shell.executeShell("settings get secure default_input_method")
+                if (defaultResult.success) {
+                    val defaultIme = defaultResult.stdout.trim()
+                    Log.d(TAG, "默认输入法: $defaultIme")
+                    if (defaultIme.isNotEmpty()) defaultIme else null
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "获取当前输入法失败", e)
+            null
+        }
+    }
+
+    /**
+     * 启用 ADBKeyboard 输入法
+     */
+    suspend fun enableADBKeyboard(): Boolean {
+        return try {
+            Log.d(TAG, "启用 ADBKeyboard...")
+
+            // 启用输入法
+            val enableCommand = "ime enable com.android.adbkeyboard/.AdbIME"
+            val enableResult = shell.executeShell(enableCommand)
+
+            if (!enableResult.success) {
+                Log.e(TAG, "启用 ADBKeyboard 失败: ${enableResult.stderr}")
+                return false
+            }
+
+            Log.d(TAG, "ADBKeyboard 启用成功")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "启用 ADBKeyboard 失败", e)
+            false
+        }
+    }
+
+    /**
+     * 切换到 ADBKeyboard 输入法
+     */
+    suspend fun switchToADBKeyboard(): Boolean {
+        return try {
+            Log.d(TAG, "切换到 ADBKeyboard...")
+
+            // 先保存当前输入法
+            if (originalInputMethod == null) {
+                originalInputMethod = getCurrentInputMethod()
+                Log.d(TAG, "保存原有输入法: $originalInputMethod")
+            }
+
+            // 设置 ADBKeyboard 为当前输入法
+            val setCommand = "ime set com.android.adbkeyboard/.AdbIME"
+            val setResult = shell.executeShell(setCommand)
+
+            if (setResult.success) {
+                Log.d(TAG, "已切换到 ADBKeyboard")
+                true
+            } else {
+                Log.e(TAG, "切换到 ADBKeyboard 失败: ${setResult.stderr}")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "切换到 ADBKeyboard 失败", e)
+            false
+        }
+    }
+
+    /**
+     * 恢复原有输入法
+     */
+    suspend fun restoreOriginalInputMethod(): Boolean {
+        return try {
+            val originalIme = originalInputMethod
+            if (originalIme.isNullOrEmpty()) {
+                Log.d(TAG, "没有保存的原有输入法，跳过恢复")
+                return true
+            }
+
+            Log.d(TAG, "恢复原有输入法: $originalIme")
+
+            // 检查原有输入法是否仍然可用
+            val listResult = shell.executeShell("ime list -s")
+            if (listResult.success && listResult.stdout.contains(originalIme)) {
+                // 恢复原有输入法
+                val setCommand = "ime set $originalIme"
+                val setResult = shell.executeShell(setCommand)
+
+                if (setResult.success) {
+                    Log.d(TAG, "已恢复原有输入法: $originalIme")
+                    originalInputMethod = null
+                    return true
+                } else {
+                    Log.e(TAG, "恢复原有输入法失败: ${setResult.stderr}")
+                    return false
+                }
+            } else {
+                Log.w(TAG, "原有输入法不可用: $originalIme")
+                originalInputMethod = null
+                return true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "恢复原有输入法失败", e)
+            false
+        }
+    }
+
+    /**
+     * 初始化输入法（安装并启用 ADBKeyboard）
+     */
+    suspend fun initializeInputMethod(): Boolean {
+        return try {
+            Log.d(TAG, "初始化输入法...")
+
+            // 1. 安装 ADBKeyboard
+            if (!installADBKeyboard()) {
+                Log.e(TAG, "安装 ADBKeyboard 失败")
+                return false
+            }
+
+            // 2. 启用 ADBKeyboard
+            if (!enableADBKeyboard()) {
+                Log.e(TAG, "启用 ADBKeyboard 失败")
+                return false
+            }
+
+            // 3. 切换到 ADBKeyboard
+            if (!switchToADBKeyboard()) {
+                Log.e(TAG, "切换到 ADBKeyboard 失败")
+                return false
+            }
+
+            Log.d(TAG, "输入法初始化完成")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "初始化输入法失败", e)
+            false
+        }
+    }
+
+    /**
+     * 使用改进的文本输入方法（支持 ADBKeyboard）
+     */
+    suspend fun typeTextImproved(text: String): Boolean {
+        return try {
+            Log.d(TAG, "输入文本: $text")
+
+            // 首先尝试使用 ADB_INPUT_TEXT 广播（适用于 ADBKeyboard）
+            val escapedText = text.replace("\"", "\\\"").replace("'", "\\'")
+            val broadcastCommand = "am broadcast -a ADB_INPUT_TEXT --es msg '$escapedText'"
+
+            val result = shell.executeShell(broadcastCommand)
+            if (result.success) {
+                Log.d(TAG, "使用 ADB_INPUT_TEXT 输入成功")
+                delay(DEFAULT_TAP_DELAY)
+                return true
+            }
+
+            // 如果广播失败，尝试使用 Base64 编码方式
+            Log.d(TAG, "ADB_INPUT_TEXT 失败，尝试 Base64 方式")
+            val base64Text = android.util.Base64.encodeToString(text.toByteArray(), android.util.Base64.NO_WRAP)
+            val base64Command = "am broadcast -a ADB_INPUT_B64 --es msg '$base64Text'"
+
+            val base64Result = shell.executeShell(base64Command)
+            if (base64Result.success) {
+                Log.d(TAG, "使用 Base64 方式输入成功")
+                delay(DEFAULT_TAP_DELAY)
+                return true
+            }
+
+            // 最后尝试传统方式（仅适用于英文）
+            Log.d(TAG, "Base64 方式失败，尝试传统 input text 方式")
+            if (text.all { it.code <= 127 }) { // 只有 ASCII 字符
+                val inputCommand = "input text '${text.replace("'", "\\'")}'"
+                val inputResult = shell.executeShell(inputCommand)
+                if (inputResult.success) {
+                    Log.d(TAG, "使用传统 input text 方式输入成功")
+                    delay(DEFAULT_TAP_DELAY)
+                    return true
+                }
+            }
+
+            Log.e(TAG, "所有文本输入方法都失败")
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "输入文本失败", e)
+            false
+        }
     }
 }
 

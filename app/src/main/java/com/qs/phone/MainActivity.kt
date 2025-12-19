@@ -78,6 +78,9 @@ class MainActivity : AppCompatActivity() {
         setupListeners()
         updatePermissionStatus()
         checkLadbStatus()
+
+//        // 系统检测时安装 ADBKeyboard
+//        performSystemCheck()
     }
 
     override fun onResume() {
@@ -790,6 +793,75 @@ class MainActivity : AppCompatActivity() {
 
         dnsConnectButton.text = "DNS 连接无线调试"
         dnsConnectButton.isEnabled = shellExecutor.isAdbLibraryAvailable()
+    }
+
+    /**
+     * 执行系统检测和初始化
+     */
+    private fun performSystemCheck() {
+        mainScope.launch {
+            try {
+                // 等待 LADB 初始化完成
+                delay(2000)
+
+                Log.d("MainActivity", "开始系统检测和 ADBKeyboard 安装...")
+
+                // 检查 LADB 是否可用
+                if (!shellExecutor.isAdbLibraryAvailable()) {
+                    Log.w("MainActivity", "LADB 不可用，跳过 ADBKeyboard 安装")
+                    return@launch
+                }
+
+                // 初始化 ShellExecutor
+                val initSuccess = shellExecutor.initialize()
+                if (!initSuccess) {
+                    Log.w("MainActivity", "ShellExecutor 初始化失败，跳过 ADBKeyboard 安装")
+                    return@launch
+                }
+
+                // 等待设备连接
+                var retryCount = 0
+                val maxRetries = 5
+                while (retryCount < maxRetries) {
+                    val devices = shellExecutor.getDevices()
+                    if (devices.isNotEmpty()) {
+                        Log.d("MainActivity", "检测到设备: $devices")
+                        break
+                    }
+                    Log.d("MainActivity", "等待设备连接... (${retryCount + 1}/$maxRetries)")
+                    delay(1000)
+                    retryCount++
+                }
+
+                if (retryCount >= maxRetries) {
+                    Log.w("MainActivity", "未检测到设备，跳过 ADBKeyboard 安装")
+                    return@launch
+                }
+
+                // 创建临时的 DeviceController 来安装 ADBKeyboard
+                val deviceController = com.qs.phone.controller.DeviceController(this@MainActivity)
+
+                // 安装并初始化 ADBKeyboard
+                val installSuccess = deviceController.initializeInputMethod()
+                if (installSuccess) {
+                    Log.d("MainActivity", "✅ ADBKeyboard 安装和初始化成功")
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "✅ ADBKeyboard 安装成功", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Log.w("MainActivity", "⚠️ ADBKeyboard 安装失败，将使用备用输入方案")
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "⚠️ ADBKeyboard 安装失败，将使用备用输入方案", Toast.LENGTH_LONG).show()
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e("MainActivity", "系统检测和 ADBKeyboard 安装失败", e)
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "系统检测失败: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
