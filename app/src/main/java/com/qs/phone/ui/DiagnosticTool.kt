@@ -55,7 +55,7 @@ object DiagnosticTool {
         return try {
             // 使用快速检查，仅验证库文件是否存在
             val shell = ShellExecutor(context)
-            val isAvailable = shell.isLadbLibraryAvailable()
+            val isAvailable = shell.isAdbLibraryAvailable()
 
             if (isAvailable) {
                 DiagnosticResult(
@@ -208,7 +208,7 @@ object DiagnosticTool {
             val shell = ShellExecutor(context)
 
             // 首先快速检查 LADB 库是否可用
-            val libraryAvailable = shell.isLadbLibraryAvailable()
+            val libraryAvailable = shell.isAdbLibraryAvailable()
             if (!libraryAvailable) {
                 return DiagnosticResult(
                     isPass = false,

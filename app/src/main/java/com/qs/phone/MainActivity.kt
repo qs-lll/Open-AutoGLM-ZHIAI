@@ -17,7 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.qs.phone.service.FloatingWindowService
 import com.qs.phone.shell.ShellExecutor
-import com.qs.phone.shell.DnsDiscover
+import com.qs.phone.discovery.DnsDiscoveryManager
 import com.qs.phone.ui.DiagnosticTool
 import com.qs.phone.ui.ErrorDialog
 import com.qs.phone.util.NativeLibraryLoader
@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
     // DNS连接相关变量
     private var dnsSearchJob: kotlinx.coroutines.Job? = null
     private var isDnsSearching = false
-    private var dnsDiscover: DnsDiscover? = null
+    private var dnsDiscoveryManager: DnsDiscoveryManager? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -287,7 +287,7 @@ class MainActivity : AppCompatActivity() {
         mainScope.launch {
             try {
                 // 使用快速检查，仅验证库文件是否存在，不执行完整初始化
-                val ladbAvailable = shellExecutor.isLadbLibraryAvailable()
+                val ladbAvailable = shellExecutor.isAdbLibraryAvailable()
                 val usbEnabled = shellExecutor.checkUSBDebuggingEnabled()
 
                 val status = buildString {
@@ -465,7 +465,7 @@ class MainActivity : AppCompatActivity() {
 //                // 确保 LADB 已初始化
                 val shell = shellExecutor
 
-//                if (!shell.isLadbLibraryAvailable()) {
+//                if (!shell.isAdbLibraryAvailable()) {
 //                    Toast.makeText(this@MainActivity, "LADB 库不可用", Toast.LENGTH_SHORT).show()
 //                    return@launch
 //                }
@@ -667,7 +667,7 @@ class MainActivity : AppCompatActivity() {
 
                 // 完全按照LADB的initServer方式实现
                 val shell = shellExecutor
-                if (!shell.isLadbLibraryAvailable()) {
+                if (!shell.isAdbLibraryAvailable()) {
                     statusText.text = "❌ LADB 库不可用\n\n请确保应用权限正常"
                     return@launch
                 }
@@ -690,12 +690,12 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 // 重置状态
                 isDnsSearching = false
-                dnsDiscover = null
+                dnsDiscoveryManager = null
 
                 runOnUiThread {
                     dnsConnectButton.text = "DNS 连接无线调试"
                     dnsConnectButton.isEnabled =
-                        shellExecutor.isLadbLibraryAvailable() && !isDnsSearching
+                        shellExecutor.isAdbLibraryAvailable() && !isDnsSearching
                 }
 
                 // 3秒后自动关闭对话框
@@ -718,67 +718,36 @@ class MainActivity : AppCompatActivity() {
 
             // 获取NSD管理器并开始DNS发现
             val nsdManager = getSystemService(Context.NSD_SERVICE) as android.net.nsd.NsdManager
-            dnsDiscover = DnsDiscover.getInstance(this@MainActivity, nsdManager)
-
-            // 重置静态变量
-            DnsDiscover.bestAdbPort = null
-            DnsDiscover.pendingResolves.set(false)
-            DnsDiscover.aliveTime = System.currentTimeMillis()
+            dnsDiscoveryManager = DnsDiscoveryManager(this@MainActivity, nsdManager)
 
             // 开始扫描
-            dnsDiscover?.scanAdbPorts()
+            val scanResult = dnsDiscoveryManager?.scanAdbPorts()
 
+            // 等待DNS扫描完成
             runOnUiThread { statusText.text = "🔍 搜索无线调试服务..." }
-
-            // 等待DNS解析完成（按照LADB的等待逻辑）
-            val nowTime = System.currentTimeMillis()
-            val maxTimeoutTime = nowTime + 10000 // 10秒超时
-            val minDnsScanTime = (DnsDiscover.aliveTime ?: nowTime) + 3000 // 最少3秒
-
-            var dnsWaitCount = 0
-            while (true) {
+            var elapsedSeconds = 0
+            for (i in 0 until 8) { // 等待8秒
                 if (!isDnsSearching) break
-
-                val currentTime = System.currentTimeMillis()
-                val pendingResolves = DnsDiscover.pendingResolves.get()
-
-                // 更新UI状态 - 必须在主线程
-                val elapsedSeconds = (currentTime - nowTime) / 1000
+                delay(1000)
+                elapsedSeconds++
                 runOnUiThread {
-                    statusText.text =
-                        "🔍 搜索无线调试服务 (${elapsedSeconds}s)...\n\n⏳ 正在发现ADB端口"
+                    statusText.text = "🔍 搜索无线调试服务 (${elapsedSeconds}s)...\n\n⏳ 正在发现ADB端口"
                 }
-
-                if (currentTime >= minDnsScanTime && !pendingResolves) {
-                    runOnUiThread { statusText.text = "✅ DNS解析完成" }
-                    break
-                }
-
-                if (currentTime >= maxTimeoutTime) {
-                    runOnUiThread { statusText.text = "⚠️ DNS发现超时" }
-                    break
-                }
-
-                Thread.sleep(1000)
-                dnsWaitCount++
-                if (dnsWaitCount >= 30) break
             }
 
-            val adbPort = DnsDiscover.bestAdbPort
-            Log.e("ports", DnsDiscover.adbPorts.toString())
-            if (adbPort != null) {
+            // 检查发现的端口
+            val discoveredPorts = dnsDiscoveryManager?.getDiscoveredPorts() ?: emptyList()
+            val adbPort = dnsDiscoveryManager?.getBestPort()
+            Log.e("ports", discoveredPorts.toString())
+
+            if (adbPort != null && discoveredPorts.isNotEmpty()) {
                 runOnUiThread {
                     statusText.text = "✅ 发现ADB端口: $adbPort\n\n正在启动ADB服务器..."
                 }
 
-//                // 按照LADB方式：启动ADB服务器
-//                shell.executeADB("adb start-server")
-//                Thread.sleep(2000)
-
-
                 // 连接到发现的端口s   只要有一个成功连接那么就可以了
                 var connected = false
-                for (port in DnsDiscover.adbPorts) {
+                for (port in discoveredPorts) {
                     runOnUiThread { statusText.text = "🔄 正在连接到 localhost:$port..." }
                     Log.e("在连接到 local  ","ports"+port+"")
                     connected = connected or shell.connectToDevice("localhost", port)
@@ -815,7 +784,7 @@ class MainActivity : AppCompatActivity() {
         dnsSearchJob = null
 
         dnsConnectButton.text = "DNS 连接无线调试"
-        dnsConnectButton.isEnabled = shellExecutor.isLadbLibraryAvailable()
+        dnsConnectButton.isEnabled = shellExecutor.isAdbLibraryAvailable()
     }
 
     override fun onDestroy() {
