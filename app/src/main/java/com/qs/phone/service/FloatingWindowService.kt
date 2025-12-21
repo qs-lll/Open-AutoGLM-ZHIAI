@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
-import android.os.Build
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -38,6 +37,12 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.view.ViewConfiguration
 import android.app.ActionBar
+import android.view.ViewGroup
+import android.animation.ObjectAnimator
+import android.view.animation.LinearInterpolator
+import android.view.WindowInsets
+import android.os.Build
+import android.view.WindowMetrics
 
 /**
  * 无障碍服务 - 用于显示浮窗和控制 Agent
@@ -64,6 +69,7 @@ class FloatingWindowService : AccessibilityService() {
     private var windowManager: WindowManager? = null
     private var floatingView: View? = null
     private var widgetView: View? = null
+    private var marqueeView: View? = null
     private var isExpanded = true
 
     private var agent: PhoneAgent? = null
@@ -88,6 +94,12 @@ class FloatingWindowService : AccessibilityService() {
     // 窗口参数
     private var mainParams: WindowManager.LayoutParams? = null
     private var widgetParams: WindowManager.LayoutParams? = null
+    private var marqueeParams: WindowManager.LayoutParams? = null
+
+    // 跑马灯动画
+    private var borderAnimator: ValueAnimator? = null
+    private var cornerAnimator: ValueAnimator? = null
+    private var typewriterJob: Job? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -130,10 +142,14 @@ class FloatingWindowService : AccessibilityService() {
 
         // 取消所有协程
         agentJob?.cancel()
-        stateCollectionJob?.cancel()
         logCollectionJob?.cancel()
+        typewriterJob?.cancel()
+
+        // 只有在服务销毁时才取消状态监听
+        stateCollectionJob?.cancel()
         serviceScope.cancel()
 
+        hideMarqueeEffect()
         removeFloatingWindow()
     }
 
@@ -196,6 +212,9 @@ class FloatingWindowService : AccessibilityService() {
             x = widgetX
             y = widgetY
         }
+
+        // 创建跑马灯视图
+        createMarqueeView()
 
         setupViews()
         setupWidgetViews()
@@ -269,6 +288,257 @@ class FloatingWindowService : AccessibilityService() {
         }
     }
 
+    /**
+     * 创建跑马灯视图
+     */
+    private fun createMarqueeView() {
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        val inflater = LayoutInflater.from(this)
+        val marqueeLayoutId = resources.getIdentifier("layout_tech_marquee", "layout", packageName)
+        marqueeView = inflater.inflate(marqueeLayoutId, null)
+
+        marqueeParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            layoutType,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            WindowManager.LayoutParams.FLAG_FULLSCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION or
+            WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS or
+            WindowManager.LayoutParams.FLAG_LAYOUT_ATTACHED_IN_DECOR,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+
+            // 获取真实屏幕尺寸，包括系统栏
+            val displayMetrics = resources.displayMetrics
+            val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val windowMetrics = windowManager.currentWindowMetrics
+                val insets = windowMetrics.windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())
+                width = windowMetrics.bounds.width()
+                height = windowMetrics.bounds.height()
+            } else {
+                @Suppress("DEPRECATION")
+                width = windowManager.defaultDisplay.width
+                @Suppress("DEPRECATION")
+                height = windowManager.defaultDisplay.height
+            }
+        }
+    }
+
+    /**
+     * 显示跑马灯效果
+     */
+    private fun showMarqueeEffect() {
+        marqueeView?.let { view ->
+            try {
+                if (view.parent == null) {
+                    windowManager?.addView(view, marqueeParams)
+                }
+                startMarqueeAnimations()
+                Log.d(TAG, "Marquee effect shown")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error showing marquee effect", e)
+            }
+        }
+    }
+
+    /**
+     * 隐藏跑马灯效果
+     */
+    private fun hideMarqueeEffect() {
+        stopMarqueeAnimations()
+        marqueeView?.let { view ->
+            try {
+                if (view.parent != null) {
+                    windowManager?.removeView(view)
+                }
+                Log.d(TAG, "Marquee effect hidden")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error hiding marquee effect", e)
+            }
+        }
+    }
+
+    /**
+     * 启动跑马灯动画
+     */
+    private fun startMarqueeAnimations() {
+        marqueeView?.let { view ->
+            // 边框渐变动画
+            borderAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 2000
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                addUpdateListener { animation ->
+                    val value = animation.animatedValue as Float
+                    val alpha = (Math.sin(value * Math.PI * 2) * 0.5 + 0.5).toFloat()
+
+                    view.findViewById<View>(
+                        resources.getIdentifier("topBorder", "id", packageName)
+                    )?.alpha = alpha
+                    view.findViewById<View>(
+                        resources.getIdentifier("bottomBorder", "id", packageName)
+                    )?.alpha = alpha
+                    view.findViewById<View>(
+                        resources.getIdentifier("leftBorder", "id", packageName)
+                    )?.alpha = alpha
+                    view.findViewById<View>(
+                        resources.getIdentifier("rightBorder", "id", packageName)
+                    )?.alpha = alpha
+
+                }
+            }
+
+            // 四角闪烁动画
+            cornerAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 1200
+                repeatCount = ValueAnimator.INFINITE
+                addUpdateListener { animation ->
+                    val value = animation.animatedValue as Float
+                    val alpha = (Math.sin(value * Math.PI * 2) * 0.5 + 0.5).toFloat()
+
+                    view.findViewById<View>(
+                        resources.getIdentifier("topLeftCorner", "id", packageName)
+                    )?.alpha = alpha
+                    view.findViewById<View>(
+                        resources.getIdentifier("topRightCorner", "id", packageName)
+                    )?.alpha = alpha
+                    view.findViewById<View>(
+                        resources.getIdentifier("bottomLeftCorner", "id", packageName)
+                    )?.alpha = alpha
+                    view.findViewById<View>(
+                        resources.getIdentifier("bottomRightCorner", "id", packageName)
+                    )?.alpha = alpha
+                }
+            }
+
+            // 启动所有动画
+            borderAnimator?.start()
+            cornerAnimator?.start()
+        }
+    }
+
+    /**
+     * 停止跑马灯动画
+     */
+    private fun stopMarqueeAnimations() {
+        borderAnimator?.cancel()
+        cornerAnimator?.cancel()
+
+        borderAnimator = null
+        cornerAnimator = null
+    }
+
+    /**
+     * 隐藏跑马灯状态指示器
+     */
+    fun hideMarqueeStatusIndicator() {
+        serviceScope.launch(Dispatchers.Main) {
+            marqueeView?.let { view ->
+                val statusLayout = view.findViewById<View>(
+                    resources.getIdentifier("statusIndicatorLayout", "id", packageName)
+                )
+                statusLayout?.visibility = View.GONE
+                Log.d(TAG, "Marquee status indicator hidden")
+            }
+        }
+    }
+
+    /**
+     * 显示跑马灯状态指示器
+     */
+    fun showMarqueeStatusIndicator() {
+        serviceScope.launch(Dispatchers.Main) {
+            marqueeView?.let { view ->
+                val statusLayout = view.findViewById<View>(
+                    resources.getIdentifier("statusIndicatorLayout", "id", packageName)
+                )
+                statusLayout?.visibility = View.VISIBLE
+                Log.d(TAG, "Marquee status indicator shown")
+            }
+        }
+    }
+
+    /**
+     * 打字机效果
+     */
+    private fun startTypewriterEffect(textView: android.widget.TextView, text: String) {
+        // 取消之前的打字机动画
+        typewriterJob?.cancel()
+
+        typewriterJob = serviceScope.launch(Dispatchers.Main) {
+            textView.text = ""
+            val delay = 30L // 每个字符之间的延迟（毫秒）
+
+            for (i in text.indices) {
+                if (coroutineContext[kotlinx.coroutines.Job]?.isActive != true) break // 检查协程是否被取消
+
+                textView.text = text.take(i + 1)
+                kotlinx.coroutines.delay(delay)
+            }
+        }
+    }
+
+    /**
+     * 更新跑马灯上的思考文本
+     */
+    fun updateMarqueeThinkingText(thinkingText: String) {
+        serviceScope.launch(Dispatchers.Main) {
+            marqueeView?.let { view ->
+                // 尝试找到专门的思考文本视图
+                val thinkingTextView = view.findViewById<android.widget.TextView>(
+                    resources.getIdentifier("thinkingText", "id", packageName)
+                )
+
+                // 检查跑马灯是否可见
+                if (view.visibility != View.VISIBLE) {
+                    // 如果跑马灯不可见，直接返回，不执行打字机效果
+                    return@launch
+                }
+
+                thinkingTextView?.let { textView ->
+                    val displayText = if (thinkingText.length > 100) {
+                        thinkingText.take(97) + "..."
+                    } else {
+                        thinkingText
+                    }
+                    startTypewriterEffect(textView, displayText)
+                    return@launch
+                }
+
+                // 如果找不到思考文本视图，尝试更新状态文本
+                val statusLayout = view.findViewById<View>(
+                    resources.getIdentifier("statusIndicatorLayout", "id", packageName)
+                )
+                if (statusLayout is android.widget.LinearLayout) {
+                    val textView = statusLayout.getChildAt(1) as? android.widget.TextView
+                    textView?.let {
+                        val displayText = if (thinkingText.length > 30) {
+                            "🤖 ${thinkingText.take(27)}..."
+                        } else {
+                            "🤖 $thinkingText"
+                        }
+                        startTypewriterEffect(it, displayText)
+                    }
+                }
+            }
+        }
+    }
 
     private fun showMainInterface() {
         Log.d(TAG, "showMainInterface called, isExpanded=$isExpanded")
@@ -424,36 +694,52 @@ class FloatingWindowService : AccessibilityService() {
 
                     // 收集状态 - 创建 Job 引用以便管理
                     stateCollectionJob = serviceScope.launch {
-                        agent?.state?.collectLatest { state ->
+                        agent?.state?.collect { state ->
+                            Log.d(TAG, "State changed to: ${state::class.simpleName}")
                             when (state) {
                                 is AgentState.Running -> {
                                     showWidgetInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = true
                                     updateStatusIndicator(true)
+                                    showMarqueeEffect()
+                                }
+
+                                is AgentState.Thinking -> {
+                                    updateMarqueeThinkingText(state.content)
+                                }
+                                is AgentState.ThinkingMsg -> {
+                                    updateMarqueeThinkingText(state.content)
                                 }
 
                                 is AgentState.Completed -> {
+                                    Log.d(TAG, "Handling Completed state: ${state.message}")
+                                    typewriterJob?.cancel() // 立即取消打字机效果
                                     showMainInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = false
                                     updateStatusIndicator(false)
+                                    hideMarqueeEffect()
                                     appendLog("✅ ${state.message}")
                                 }
 
                                 is AgentState.Error -> {
+                                    typewriterJob?.cancel() // 立即取消打字机效果
                                     showMainInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = false
                                     updateStatusIndicator(false)
+                                    hideMarqueeEffect()
                                     appendLog("❌ ${state.message}")
                                 }
 
                                 is AgentState.Idle -> {
+                                    typewriterJob?.cancel() // 立即取消打字机效果
                                     showMainInterface()
                                     startButton?.isEnabled = true
                                     stopButton?.isEnabled = false
                                     updateStatusIndicator(false)
+                                    hideMarqueeEffect()
                                 }
 
                                 else -> {}
@@ -469,7 +755,18 @@ class FloatingWindowService : AccessibilityService() {
                         } catch (e: Exception) {
                             appendLog("❌ 错误: ${e.message}")
                         } finally {
+                            Log.d(TAG, "Agent job finished, ensuring main interface is shown")
                             agent?.cleanup()
+
+                            // 确保在主线程中切换界面
+                            serviceScope.launch(Dispatchers.Main) {
+                                showMainInterface()
+                                startButton?.isEnabled = true
+                                stopButton?.isEnabled = false
+                                updateStatusIndicator(false)
+                                hideMarqueeEffect()
+                                typewriterJob?.cancel()
+                            }
                         }
                     }
                 } else {
@@ -491,13 +788,19 @@ class FloatingWindowService : AccessibilityService() {
     private fun stopAgent() {
         agent?._state?.value = AgentState.Thinking("思考中...")
         Log.d(TAG, "Stopping agent")
-        // 取消所有相关协程
-        agentJob?.cancel()
-        stateCollectionJob?.cancel()
-        logCollectionJob?.cancel()
 
+        // 先停止 Agent，让状态变化被处理
         agent?.stop()
         agent?.cleanup()
+
+        typewriterJob?.cancel() // 取消打字机效果
+        hideMarqueeEffect()
+
+        // 最后才取消协程
+        agentJob?.cancel()
+        logCollectionJob?.cancel()
+        // 注意：不要在这里取消 stateCollectionJob，否则无法接收后续的状态变化
+
         appendLog("⏹️ 已停止")
     }
 

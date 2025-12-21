@@ -45,6 +45,7 @@ sealed class AgentState {
     object Idle : AgentState()
     object Running : AgentState()
     data class Thinking(val content: String) : AgentState()
+    data class ThinkingMsg(val content: String) : AgentState()
     data class Executing(val action: String) : AgentState()
     data class Completed(val message: String) : AgentState()
     data class Error(val message: String) : AgentState()
@@ -240,9 +241,13 @@ class PhoneAgent(
 
             val response = modelClient.request(conversationContext)
 
-            log("💭 resp: ${response}...")
+//            log("💭 resp: ${response}...")
             log("💭 思考: ${response.thinking.take(200)}...")
-            _state.value = AgentState.Thinking(response.thinking)
+            val thinkingContent = response.thinking.take(200)
+
+            mainScope.launch {
+                _state.value = AgentState.ThinkingMsg(thinkingContent)
+            }
 
             // 解析动作
             val action = try {

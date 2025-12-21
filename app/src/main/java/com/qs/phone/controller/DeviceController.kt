@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import android.util.Log
 import com.qs.phone.config.AppPackages
+import com.qs.phone.service.FloatingWindowService
 import com.qs.phone.shell.ShellExecutor
 import com.qs.phone.shell.ShellResult
 import kotlinx.coroutines.*
@@ -169,10 +170,21 @@ class DeviceController(
     suspend fun takeScreenshot(): ScreenshotResult {
         return try {
             Log.d(TAG, "Taking screenshot via ADB")
+
+            // 通知 FloatingWindowService 隐藏状态指示器
+            FloatingWindowService.instance?.hideMarqueeStatusIndicator()
+
             // ?? ADB ????
-            takeScreenshotViaAdbExecOut()
+            val result = takeScreenshotViaAdbExecOut()
+
+            // 截图完成后显示状态指示器
+            FloatingWindowService.instance?.showMarqueeStatusIndicator()
+
+            result
         } catch (e: Exception) {
             Log.e(TAG, "Screenshot error", e)
+            // 出错时也要显示状态指示器
+            FloatingWindowService.instance?.showMarqueeStatusIndicator()
             ScreenshotResult(null, null, 0, 0)
         }
     }
