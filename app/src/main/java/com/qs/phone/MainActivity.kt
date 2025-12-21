@@ -23,6 +23,7 @@ import com.qs.phone.ui.ErrorDialog
 import com.qs.phone.util.NativeLibraryLoader
 import com.qs.phone.util.PermissionManager
 import com.qs.phone.controller.AppDetectionTest
+import com.qs.phone.controller.DeviceController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -227,7 +228,16 @@ class MainActivity : AppCompatActivity() {
                     appDetectionTest.testAppDetection()
 
                     val results = DiagnosticTool.runFullDiagnostic(this@MainActivity)
-                    val report = DiagnosticTool.generateReport(results)
+                    var report = DiagnosticTool.generateReport(results)
+
+                    // 添加输入法状态诊断
+                    try {
+                        val deviceController = DeviceController(this@MainActivity)
+                        val inputMethodInfo = deviceController.getInputMethodInfo()
+                        report = "\n\n$inputMethodInfo\n\n$report"
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "获取输入法状态失败", e)
+                    }
 
                     // 显示诊断报告
                     AlertDialog.Builder(this@MainActivity)

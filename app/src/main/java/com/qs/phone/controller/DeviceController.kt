@@ -853,22 +853,36 @@ class DeviceController(
      */
     suspend fun getCurrentInputMethod(): String? {
         return try {
-            val result = shell.executeShell("ime list -s | head -1")
+            // 方法1：获取当前选中的输入法（最准确）
+            var result = shell.executeShell("settings get secure default_input_method")
             if (result.success && result.stdout.isNotBlank()) {
                 val currentIme = result.stdout.trim()
-                Log.d(TAG, "当前输入法: $currentIme")
-                currentIme
-            } else {
-                // 备用方法：获取默认输入法
-                val defaultResult = shell.executeShell("settings get secure default_input_method")
-                if (defaultResult.success) {
-                    val defaultIme = defaultResult.stdout.trim()
-                    Log.d(TAG, "默认输入法: $defaultIme")
-                    if (defaultIme.isNotEmpty()) defaultIme else null
-                } else {
-                    null
+                if (currentIme.isNotEmpty() && currentIme != "null") {
+                    Log.d(TAG, "当前输入法: $currentIme")
+                    return currentIme
                 }
             }
+
+            // 方法2：如果默认输入法为空，尝试获取当前正在使用的输入法
+            result = shell.executeShell("dumpsys input_method | grep 'mCurMethodId' | grep -o '([^)]*)' | sed 's/[()]//g'")
+            if (result.success && result.stdout.isNotBlank()) {
+                val currentIme = result.stdout.trim()
+                if (currentIme.isNotEmpty()) {
+                    Log.d(TAG, "通过 dumpsys 获取当前输入法: $currentIme")
+                    return currentIme
+                }
+            }
+
+            // 方法3：获取第一个已启用的输入法作为备用
+            result = shell.executeShell("ime list -s | head -1")
+            if (result.success && result.stdout.isNotBlank()) {
+                val firstIme = result.stdout.trim()
+                Log.d(TAG, "使用第一个可用输入法: $firstIme")
+                return firstIme
+            }
+
+            Log.w(TAG, "无法获取当前输入法")
+            null
         } catch (e: Exception) {
             Log.e(TAG, "获取当前输入法失败", e)
             null
@@ -904,27 +918,66 @@ class DeviceController(
      */
     suspend fun switchToADBKeyboard(): Boolean {
         return try {
-            Log.d(TAG, "切换到 ADBKeyboard...")
+            Log.d(TAG, "开始切换到 ADBKeyboard...")
 
-            // 先保存当前输入法
+            // 先检查 ADBKeyboard 是否已安装并启用
+            if (!isADBKeyboardInstalled()) {
+                Log.w(TAG, "ADBKeyboard 未安装，尝试安装...")
+                if (!installADBKeyboard()) {
+                    Log.e(TAG, "ADBKeyboard 安装失败")
+                    return false
+                }
+            }
+
+            // 确保 ADBKeyboard 已启用
+            if (!enableADBKeyboard()) {
+                Log.e(TAG, "ADBKeyboard 启用失败")
+                return false
+            }
+
+            // 保存当前输入法（只在第一次时保存）
             if (originalInputMethod == null) {
-                originalInputMethod = getCurrentInputMethod()
-                Log.d(TAG, "保存原有输入法: $originalInputMethod")
+                val currentIme = getCurrentInputMethod()
+                originalInputMethod = currentIme
+                Log.d(TAG, "💾 保存原有输入法: $currentIme")
             }
 
             // 设置 ADBKeyboard 为当前输入法
             val setCommand = "ime set com.android.adbkeyboard/.AdbIME"
+            Log.d(TAG, "执行切换命令: $setCommand")
             val setResult = shell.executeShell(setCommand)
 
             if (setResult.success) {
-                Log.d(TAG, "已切换到 ADBKeyboard")
-                true
+                Log.d(TAG, "✅ ADBKeyboard 切换命令执行成功")
+
+                // 验证是否真的切换成功了
+                delay(500) // 等待切换完成
+                val currentIme = getCurrentInputMethod()
+                if (currentIme != null && currentIme.contains("adbkeyboard", ignoreCase = true)) {
+                    Log.d(TAG, "✅ ADBKeyboard 切换验证成功: $currentIme")
+                    return true
+                } else {
+                    Log.w(TAG, "⚠️ ADBKeyboard 切换验证失败，当前输入法: $currentIme")
+                    // 尝试再次切换
+                    Log.d(TAG, "尝试再次切换...")
+                    val retryResult = shell.executeShell(setCommand)
+                    if (retryResult.success) {
+                        delay(300)
+                        val retryIme = getCurrentInputMethod()
+                        if (retryIme != null && retryIme.contains("adbkeyboard", ignoreCase = true)) {
+                            Log.d(TAG, "✅ ADBKeyboard 重试切换成功")
+                            return true
+                        }
+                    }
+                    Log.e(TAG, "❌ ADBKeyboard 多次尝试切换失败")
+                    return false
+                }
             } else {
-                Log.e(TAG, "切换到 ADBKeyboard 失败: ${setResult.stderr}")
-                false
+                Log.e(TAG, "❌ ADBKeyboard 切换命令失败: ${setResult.stderr}")
+                return false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "切换到 ADBKeyboard 失败", e)
+            Log.e(TAG, "❌ 切换到 ADBKeyboard 时发生异常", e)
             false
         }
     }
@@ -940,31 +993,87 @@ class DeviceController(
                 return true
             }
 
-            Log.d(TAG, "恢复原有输入法: $originalIme")
+            Log.d(TAG, "尝试恢复原有输入法: $originalIme")
 
-            // 检查原有输入法是否仍然可用
+            // 首先检查原有输入法是否仍然启用
             val listResult = shell.executeShell("ime list -s")
-            if (listResult.success && listResult.stdout.contains(originalIme)) {
-                // 恢复原有输入法
+            if (!listResult.success) {
+                Log.e(TAG, "获取输入法列表失败")
+                originalInputMethod = null
+                return false
+            }
+
+            val availableImes = listResult.stdout.lines().filter { it.isNotBlank() }
+            Log.d(TAG, "可用输入法列表: ${availableImes.joinToString(", ")}")
+
+            if (availableImes.contains(originalIme)) {
+                // 原有输入法仍然可用，直接恢复
+                Log.d(TAG, "原有输入法可用，开始恢复: $originalIme")
                 val setCommand = "ime set $originalIme"
                 val setResult = shell.executeShell(setCommand)
 
                 if (setResult.success) {
-                    Log.d(TAG, "已恢复原有输入法: $originalIme")
-                    originalInputMethod = null
-                    return true
+                    Log.d(TAG, "✅ 成功恢复原有输入法: $originalIme")
+
+                    // 验证是否真的切换成功了
+                    delay(500) // 等待切换完成
+                    val currentIme = getCurrentInputMethod()
+                    if (currentIme == originalIme) {
+                        Log.d(TAG, "✅ 输入法恢复验证成功")
+                        originalInputMethod = null
+                        return true
+                    } else {
+                        Log.w(TAG, "⚠️ 输入法恢复验证失败，当前: $currentIme，期望: $originalIme")
+                        // 不返回 false，因为可能是系统延迟导致的
+                        originalInputMethod = null
+                        return true
+                    }
                 } else {
-                    Log.e(TAG, "恢复原有输入法失败: ${setResult.stderr}")
+                    Log.e(TAG, "❌ 恢复原有输入法失败: ${setResult.stderr}")
                     return false
                 }
             } else {
-                Log.w(TAG, "原有输入法不可用: $originalIme")
+                Log.w(TAG, "⚠️ 原有输入法不可用: $originalIme")
+
+                // 尝试恢复到系统默认输入法
+                val systemDefault = getSystemDefaultInputMethod()
+                if (systemDefault != null && availableImes.contains(systemDefault)) {
+                    Log.d(TAG, "尝试恢复到系统默认输入法: $systemDefault")
+                    val setCommand = "ime set $systemDefault"
+                    val setResult = shell.executeShell(setCommand)
+
+                    if (setResult.success) {
+                        Log.d(TAG, "✅ 已恢复到系统默认输入法: $systemDefault")
+                    }
+                }
+
                 originalInputMethod = null
-                return true
+                return true // 不算失败，因为输入法不可用不是我们的问题
             }
         } catch (e: Exception) {
-            Log.e(TAG, "恢复原有输入法失败", e)
+            Log.e(TAG, "恢复原有输入法时发生异常", e)
+            originalInputMethod = null // 清空以避免后续重复尝试
             false
+        }
+    }
+
+    /**
+     * 获取系统默认输入法（非ADBKeyboard）
+     */
+    private suspend fun getSystemDefaultInputMethod(): String? {
+        return try {
+            // 获取所有已启用的输入法
+            val result = shell.executeShell("ime list -s")
+            if (result.success) {
+                val imes = result.stdout.lines().filter { it.isNotBlank() }
+                // 返回第一个不是 ADBKeyboard 的输入法
+                imes.find { !it.contains("adbkeyboard", ignoreCase = true) }
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "获取系统默认输入法失败", e)
+            null
         }
     }
 
@@ -1002,6 +1111,51 @@ class DeviceController(
     }
 
     /**
+     * 获取输入法状态信息（用于调试）
+     */
+    suspend fun getInputMethodInfo(): String {
+        return try {
+            val sb = StringBuilder()
+            sb.append("=== 输入法状态 ===\n\n")
+
+            // 当前输入法
+            val currentIme = getCurrentInputMethod()
+            sb.append("当前输入法: $currentIme\n")
+
+            // 保存的原有输入法
+            sb.append("保存的原有输入法: $originalInputMethod\n")
+
+            // ADBKeyboard 安装状态
+            val adbInstalled = isADBKeyboardInstalled()
+            sb.append("ADBKeyboard 已安装: ${if (adbInstalled) "是" else "否"}\n")
+
+            // 所有可用输入法
+            val listResult = shell.executeShell("ime list -s")
+            if (listResult.success) {
+                val imes = listResult.stdout.lines().filter { it.isNotBlank() }
+                sb.append("可用输入法列表 (${imes.size}):\n")
+                imes.forEachIndexed { index, ime ->
+                    val isCurrent = if (ime == currentIme) " [当前]" else ""
+                    val isADB = if (ime.contains("adbkeyboard", ignoreCase = true)) " [ADB]" else ""
+                    sb.append("  ${index + 1}. $ime$isCurrent$isADB\n")
+                }
+            }
+
+            // 系统默认输入法设置
+            val defaultResult = shell.executeShell("settings get secure default_input_method")
+            if (defaultResult.success) {
+                val defaultIme = defaultResult.stdout.trim()
+                sb.append("系统默认设置: $defaultIme\n")
+            }
+
+            return sb.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "获取输入法状态失败", e)
+            "获取输入法状态失败: ${e.message}"
+        }
+    }
+
+    /**
      * 使用改进的文本输入方法（支持 ADBKeyboard）
      */
     suspend fun typeTextImproved(text: String): Boolean {
@@ -1021,7 +1175,7 @@ class DeviceController(
 
             // 如果广播失败，尝试使用 Base64 编码方式
             Log.d(TAG, "ADB_INPUT_TEXT 失败，尝试 Base64 方式")
-            val base64Text = android.util.Base64.encodeToString(text.toByteArray(), android.util.Base64.NO_WRAP)
+            val base64Text = Base64.encodeToString(text.toByteArray(), Base64.NO_WRAP)
             val base64Command = "am broadcast -a ADB_INPUT_B64 --es msg '$base64Text'"
 
             val base64Result = shell.executeShell(base64Command)
