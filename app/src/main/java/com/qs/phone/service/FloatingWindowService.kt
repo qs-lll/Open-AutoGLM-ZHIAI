@@ -39,10 +39,12 @@ import android.view.ViewConfiguration
 import android.app.ActionBar
 import android.view.ViewGroup
 import android.animation.ObjectAnimator
+import android.graphics.Color
 import android.view.animation.LinearInterpolator
 import android.view.WindowInsets
 import android.os.Build
 import android.view.WindowMetrics
+import android.view.animation.AccelerateDecelerateInterpolator
 
 /**
  * 无障碍服务 - 用于显示浮窗和控制 Agent
@@ -100,6 +102,7 @@ class FloatingWindowService : AccessibilityService() {
     private var borderAnimator: ValueAnimator? = null
     private var cornerAnimator: ValueAnimator? = null
     private var typewriterJob: Job? = null
+    private var rainbowAnimator: ValueAnimator? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -379,68 +382,159 @@ class FloatingWindowService : AccessibilityService() {
      */
     private fun startMarqueeAnimations() {
         marqueeView?.let { view ->
-            // 边框渐变动画
-            borderAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 2000
+            Log.d(TAG, "Starting gradient rainbow marquee animations")
+
+            // 获取四条边线视图 - 创建连续渐变效果
+            val topBorder = view.findViewById<View>(resources.getIdentifier("topBorderBg", "id", packageName))
+            val bottomBorder = view.findViewById<View>(resources.getIdentifier("bottomBorderBg", "id", packageName))
+            val leftBorder = view.findViewById<View>(resources.getIdentifier("leftBorderBg", "id", packageName))
+            val rightBorder = view.findViewById<View>(resources.getIdentifier("rightBorderBg", "id", packageName))
+
+            val borders = listOfNotNull(topBorder, bottomBorder, leftBorder, rightBorder)
+
+            // 创建连续渐变的彩虹动画
+            rainbowAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+                duration = 4000 // 4秒完成一圈
                 repeatCount = ValueAnimator.INFINITE
                 interpolator = LinearInterpolator()
+
                 addUpdateListener { animation ->
-                    val value = animation.animatedValue as Float
-                    val alpha = (Math.sin(value * Math.PI * 2) * 0.5 + 0.5).toFloat()
+                    try {
+                        val hue = animation.animatedValue as Float
 
-                    view.findViewById<View>(
-                        resources.getIdentifier("topBorder", "id", packageName)
-                    )?.alpha = alpha
-                    view.findViewById<View>(
-                        resources.getIdentifier("bottomBorder", "id", packageName)
-                    )?.alpha = alpha
-                    view.findViewById<View>(
-                        resources.getIdentifier("leftBorder", "id", packageName)
-                    )?.alpha = alpha
-                    view.findViewById<View>(
-                        resources.getIdentifier("rightBorder", "id", packageName)
-                    )?.alpha = alpha
+                        // 为每条边创建渐变
+                        borders.forEachIndexed { index, border ->
+                            // 为每条边创建不同的渐变起点，形成连续流动效果
+                            val startHue = (hue + index * 90) % 360
+                            val endHue = (startHue + 180) % 360
 
+                            // 创建渐变drawable
+                            val gradient = android.graphics.drawable.GradientDrawable().apply {
+                                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+
+                                // 根据边框方向设置渐变角度
+                                val angle = when (index) {
+                                    0 -> 0 // 顶部：左右渐变
+                                    1 -> 0 // 底部：左右渐变
+                                    2 -> 90 // 左侧：上下渐变
+                                    else -> 90 // 右侧：上下渐变
+                                }
+
+                                // 创建连续彩虹渐变
+                                val colors = intArrayOf(
+                                    android.graphics.Color.HSVToColor(floatArrayOf(startHue, 1.0f, 1.0f)),
+                                    android.graphics.Color.HSVToColor(floatArrayOf((startHue + 60) % 360, 1.0f, 1.0f)),
+                                    android.graphics.Color.HSVToColor(floatArrayOf((startHue + 120) % 360, 1.0f, 1.0f)),
+                                    android.graphics.Color.HSVToColor(floatArrayOf(endHue, 1.0f, 1.0f))
+                                )
+
+                                orientation = when (index) {
+                                    0, 1 -> android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT
+                                    else -> android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM
+                                }
+
+                                setColors(colors)
+                            }
+
+                            border.background = gradient
+
+                            // 添加脉冲亮度效果
+                            val brightness = 0.6f + 0.4f * kotlin.math.sin(kotlin.math.PI * hue / 180).toFloat()
+                            border.alpha = brightness
+                        }
+
+                        // 同时更新分段背景为渐变补充效果
+                        updateSegmentGradients(view, hue)
+
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Gradient marquee animation error: ${e.message}")
+                    }
                 }
             }
 
-            // 四角闪烁动画
+            // 四角闪烁动画 - 增强科技感
             cornerAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = 1200
                 repeatCount = ValueAnimator.INFINITE
+                interpolator = AccelerateDecelerateInterpolator()
+
                 addUpdateListener { animation ->
                     val value = animation.animatedValue as Float
-                    val alpha = (Math.sin(value * Math.PI * 2) * 0.5 + 0.5).toFloat()
+                    val alpha = (kotlin.math.sin(value * kotlin.math.PI * 2) * 0.5 + 0.5).toFloat()
 
-                    view.findViewById<View>(
-                        resources.getIdentifier("topLeftCorner", "id", packageName)
-                    )?.alpha = alpha
-                    view.findViewById<View>(
-                        resources.getIdentifier("topRightCorner", "id", packageName)
-                    )?.alpha = alpha
-                    view.findViewById<View>(
-                        resources.getIdentifier("bottomLeftCorner", "id", packageName)
-                    )?.alpha = alpha
-                    view.findViewById<View>(
-                        resources.getIdentifier("bottomRightCorner", "id", packageName)
-                    )?.alpha = alpha
+                    view.findViewById<View>(resources.getIdentifier("topLeftCorner", "id", packageName))?.alpha = alpha
+                    view.findViewById<View>(resources.getIdentifier("topRightCorner", "id", packageName))?.alpha = alpha
+                    view.findViewById<View>(resources.getIdentifier("bottomLeftCorner", "id", packageName))?.alpha = alpha
+                    view.findViewById<View>(resources.getIdentifier("bottomRightCorner", "id", packageName))?.alpha = alpha
                 }
             }
 
-            // 启动所有动画
-            borderAnimator?.start()
+            // 启动动画
+            rainbowAnimator?.start()
             cornerAnimator?.start()
+
+            Log.d(TAG, "🌈 Gradient rainbow marquee animations started with smooth flowing colors!")
+        } ?: Log.e(TAG, "Marquee view is null - cannot start animations")
+    }
+
+    /**
+     * 更新分段渐变效果 - 作为主边框渐变的补充
+     */
+    private fun updateSegmentGradients(view: View, baseHue: Float) {
+        val segmentIds = listOf(
+            // 顶部
+            "topSeg1", "topSeg2", "topSeg3", "topSeg4", "topSeg5", "topSeg6",
+            // 右侧
+            "rightSeg1", "rightSeg2", "rightSeg3", "rightSeg4", "rightSeg5", "rightSeg6",
+            // 底部
+            "bottomSeg1", "bottomSeg2", "bottomSeg3", "bottomSeg4", "bottomSeg5", "bottomSeg6",
+            // 左侧
+            "leftSeg1", "leftSeg2", "leftSeg3", "leftSeg4", "leftSeg5", "leftSeg6"
+        )
+
+        segmentIds.forEachIndexed { index, id ->
+            view.findViewById<View>(resources.getIdentifier(id, "id", packageName))?.let { segment ->
+                val segmentHue = (baseHue + index * 15) % 360
+                val color = android.graphics.Color.HSVToColor(floatArrayOf(segmentHue, 0.8f, 1.0f))
+                segment.setBackgroundColor(color)
+
+                // 创建柔和的透明度变化
+                val alpha = 0.3f + 0.2f * kotlin.math.sin(kotlin.math.PI * index / 6).toFloat()
+                segment.alpha = alpha
+            }
         }
+    }
+
+    /**
+     * 颜色插值函数 - 在两个颜色之间平滑过渡
+     */
+    private fun interpolateColor(startColor: Int, endColor: Int, fraction: Float): Int {
+        val startA = Color.alpha(startColor)
+        val startR = Color.red(startColor)
+        val startG = Color.green(startColor)
+        val startB = Color.blue(startColor)
+
+        val endA = Color.alpha(endColor)
+        val endR = Color.red(endColor)
+        val endG = Color.green(endColor)
+        val endB = Color.blue(endColor)
+
+        val a = (startA + (endA - startA) * fraction).toInt()
+        val r = (startR + (endR - startR) * fraction).toInt()
+        val g = (startG + (endG - startG) * fraction).toInt()
+        val b = (startB + (endB - startB) * fraction).toInt()
+
+        return Color.argb(a, r, g, b)
     }
 
     /**
      * 停止跑马灯动画
      */
     private fun stopMarqueeAnimations() {
-        borderAnimator?.cancel()
+        rainbowAnimator?.cancel()
         cornerAnimator?.cancel()
 
-        borderAnimator = null
+        rainbowAnimator = null
         cornerAnimator = null
     }
 
