@@ -1,8 +1,12 @@
 package com.qs.phone.controller
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Build
 import android.util.Base64
 import android.util.Log
 import com.qs.phone.config.AppPackages
@@ -781,30 +785,36 @@ class DeviceController(
             }
 
             try {
-                // 安装 APK
-                val installCommand = "pm install -r ${tempApkFile.absolutePath}"
-                Log.d(TAG, "执行安装命令: $installCommand")
-                val result = shell.executeShell(installCommand)
+                // 通过系统 Intent 安装 APK
+                installApkThroughSystem(tempApkFile)
 
-                if (result.success) {
-                    Log.d(TAG, "ADBKeyboard 安装成功")
-                    // 删除临时文件
-                    tempApkFile.delete()
-                    return true
-                } else {
-                    Log.e(TAG, "ADBKeyboard 安装失败: ${result.stderr}")
-                    return false
+                // 等待用户完成安装，然后检查是否安装成功
+                Thread.sleep(3000) // 等待安装界面启动
+
+                // 删除临时文件
+                tempApkFile.delete()
+
+                // 检查是否安装成功
+                var retryCount = 0
+                val maxRetries = 10
+                while (retryCount < maxRetries) {
+                    if (isADBKeyboardInstalled()) {
+                        Log.d(TAG, "ADBKeyboard 用户安装成功")
+                        return true
+                    }
+                    Log.d(TAG, "等待 ADBKeyboard 安装完成... (${retryCount + 1}/$maxRetries)")
+                    Thread.sleep(1000)
+                    retryCount++
                 }
+
+                Log.w(TAG, "ADBKeyboard 安装超时，用户可能取消了安装")
+                return false
+
             } catch (e: Exception) {
                 Log.e(TAG, "安装 ADBKeyboard 时发生异常", e)
+                // 删除临时文件
+                tempApkFile.delete()
                 return false
-            } finally {
-                // 确保删除临时文件
-                try {
-                    tempApkFile.delete()
-                } catch (e: Exception) {
-                    Log.w(TAG, "删除临时文件失败", e)
-                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "安装 ADBKeyboard 失败", e)
@@ -815,10 +825,24 @@ class DeviceController(
     /**
      * 检查 ADBKeyboard 是否已安装
      */
-    suspend fun isADBKeyboardInstalled(): Boolean {
+    fun isADBKeyboardInstalled(): Boolean {
         return try {
-            val result = shell.executeShell("pm list packages | grep com.android.adbkeyboard")
-            result.success && result.stdout.contains("com.android.adbkeyboard")
+            // 使用原生 Android API 检查应用是否已安装
+            val packageManager = context.packageManager
+            for ( appInfo in packageManager.getInstalledApplications(0)) {
+                // 应用名称（解析字符串资源）
+                var appName = packageManager.getApplicationLabel(appInfo).toString();
+                // 应用包名
+                var packageName = appInfo.packageName;
+                // 判断是否为系统应用
+                var isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0;
+
+                Log.d("InstalledApp", "名称：" + appName + " | 包名：" + packageName + " | 系统应用：" + isSystemApp);}
+            Log.e(TAG, packageManager.getPackageInfo("com.android.adbkeyboard", 0).toString())
+            true
+        } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
+            // 应用未安装
+            false
         } catch (e: Exception) {
             Log.e(TAG, "检查 ADBKeyboard 安装状态失败", e)
             false
@@ -1202,6 +1226,41 @@ class DeviceController(
         } catch (e: Exception) {
             Log.e(TAG, "输入文本失败", e)
             false
+        }
+    }
+
+    /**
+     * 通过系统 Intent 安装 APK
+     */
+    private fun installApkThroughSystem(apkFile: File) {
+        try {
+            Log.d(TAG, "通过系统 Intent 安装 APK: ${apkFile.absolutePath}")
+
+            // 创建安装 Intent
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+                // 对于 Android 7.0+ 需要使用 FileProvider
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    val authority = "${context.packageName}.fileprovider"
+                    val apkUri = androidx.core.content.FileProvider.getUriForFile(context, authority, apkFile)
+                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                } else {
+                    // Android 7.0 以下直接使用文件路径
+                    setDataAndType(android.net.Uri.fromFile(apkFile), "application/vnd.android.package-archive")
+                }
+            }
+
+            // 权限检查已在调用方完成
+
+            // 启动安装界面
+            context.startActivity(intent)
+            Log.d(TAG, "已启动系统安装界面")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "启动系统安装界面失败", e)
+            throw e
         }
     }
 }

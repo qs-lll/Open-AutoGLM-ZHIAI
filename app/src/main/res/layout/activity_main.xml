@@ -245,6 +245,119 @@
                     android:textSize="14sp"
                     android:layout_marginBottom="12dp" />
 
+                <!-- 检测项列表 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginBottom="12dp">
+
+                    <!-- LADB 检测 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="LADB 检测"
+                            android:textSize="14sp"
+                            android:textColor="#333333" />
+
+                        <ImageView
+                            android:id="@+id/iv_ladb_status"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_marginEnd="8dp"
+                            android:src="@android:drawable/ic_menu_info_details"
+                            android:visibility="gone" />
+
+                        <Button
+                            android:id="@+id/btn_setup_ladb"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:text="设置"
+                            android:textSize="12sp"
+                            android:visibility="gone"
+                            style="@style/Widget.Material3.Button.TonalButton" />
+
+                    </LinearLayout>
+
+                    <!-- 设备连接检测 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="设备连接"
+                            android:textSize="14sp"
+                            android:textColor="#333333" />
+
+                        <ImageView
+                            android:id="@+id/iv_device_status"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_marginEnd="8dp"
+                            android:src="@android:drawable/ic_menu_info_details"
+                            android:visibility="gone" />
+
+                        <Button
+                            android:id="@+id/btn_connect_device"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:text="连接"
+                            android:textSize="12sp"
+                            android:visibility="gone"
+                            style="@style/Widget.Material3.Button.TonalButton" />
+
+                    </LinearLayout>
+
+                    <!-- 输入法安装检测 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="输入法安装"
+                            android:textSize="14sp"
+                            android:textColor="#333333" />
+
+                        <ImageView
+                            android:id="@+id/iv_ime_status"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_marginEnd="8dp"
+                            android:src="@android:drawable/ic_menu_info_details"
+                            android:visibility="gone" />
+
+                        <Button
+                            android:id="@+id/btn_install_ime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:text="安装"
+                            android:textSize="12sp"
+                            android:visibility="gone"
+                            style="@style/Widget.Material3.Button.TonalButton" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
                 <Button
                     android:id="@+id/checkWirelessButton"
                     android:layout_width="match_parent"

@@ -19,8 +19,24 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- 安装未知来源应用权限 (Android 8.0+) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 <!--    dns 连接设备权限-->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- 声明需要查询的应用包名 -->
+    <queries>
+        <!-- 示例：微信、抖音、知乎 -->
+        <package android:name="com.tencent.mm" />
+        <package android:name="com.android.adbkeyboard" />
+        <package android:name="com.zhihu.android" />
+
+        <!-- 如需访问所有应用，添加以下（替代方式2） -->
+        <!-- <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent> -->
+    </queries>
 
     <application
         android:allowBackup="true"

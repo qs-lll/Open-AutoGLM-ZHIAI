@@ -35,6 +35,10 @@ import android.content.Context
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val REQUEST_INSTALL_PERMISSION = 1001
+    }
+
     private lateinit var statusIndicator: View
     private lateinit var statusText: TextView
     private lateinit var enableServiceButton: Button
@@ -54,6 +58,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var checkWirelessButton: Button
     private lateinit var wirelessStatusText: TextView
     private lateinit var screenshotTestButton: Button
+
+    // 检测项视图
+    private lateinit var ladbStatusImageView: ImageView
+    private lateinit var setupLadbButton: Button
+    private lateinit var deviceStatusImageView: ImageView
+    private lateinit var connectDeviceButton: Button
+    private lateinit var imeStatusImageView: ImageView
+    private lateinit var installImeButton: Button
 
     private val prefs by lazy {
         getSharedPreferences("zhiai_config", Context.MODE_PRIVATE)
@@ -80,6 +92,9 @@ class MainActivity : AppCompatActivity() {
         updatePermissionStatus()
         checkLadbStatus()
 
+        // 初始化检测状态
+        initDetectionStatus()
+
 //        // 系统检测时安装 ADBKeyboard
 //        performSystemCheck()
     }
@@ -87,6 +102,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateServiceStatus()
+
+        // 重新检查检测状态
+        checkAllDetectionStatus()
     }
 
     private fun initViews() {
@@ -109,6 +127,14 @@ class MainActivity : AppCompatActivity() {
         checkWirelessButton = findViewById(R.id.checkWirelessButton)
         wirelessStatusText = findViewById(R.id.wirelessStatusText)
         screenshotTestButton = findViewById(R.id.screenshotTestButton)
+
+        // 初始化检测项视图
+        ladbStatusImageView = findViewById(R.id.iv_ladb_status)
+        setupLadbButton = findViewById(R.id.btn_setup_ladb)
+        deviceStatusImageView = findViewById(R.id.iv_device_status)
+        connectDeviceButton = findViewById(R.id.btn_connect_device)
+        imeStatusImageView = findViewById(R.id.iv_ime_status)
+        installImeButton = findViewById(R.id.btn_install_ime)
     }
 
     private fun loadConfig() {
@@ -261,6 +287,19 @@ class MainActivity : AppCompatActivity() {
 
         screenshotTestButton.setOnClickListener {
             performScreenshotTest()
+        }
+
+        // 设置检测项的点击事件
+        setupLadbButton.setOnClickListener {
+            setupLadb()
+        }
+
+        connectDeviceButton.setOnClickListener {
+            connectDevice()
+        }
+
+        installImeButton.setOnClickListener {
+            installInputMethod()
         }
     }
 
@@ -873,6 +912,241 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    /**
+     * 初始化检测状态
+     */
+    private fun initDetectionStatus() {
+        checkAllDetectionStatus()
+    }
+
+    /**
+     * 检查所有检测项状态
+     */
+    private fun checkAllDetectionStatus() {
+        checkLadbDetectionStatus()
+        checkDeviceConnectionStatus()
+        checkInputMethodStatus()
+    }
+
+    /**
+     * 检查 LADB 状态
+     */
+    private fun checkLadbDetectionStatus() {
+        val isLadbAvailable = shellExecutor.isAdbLibraryAvailable()
+
+        runOnUiThread {
+            if (isLadbAvailable) {
+                ladbStatusImageView.visibility = View.VISIBLE
+                ladbStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                ladbStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_green_dark))
+                setupLadbButton.visibility = View.GONE
+            } else {
+                ladbStatusImageView.visibility = View.VISIBLE
+                ladbStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                ladbStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                setupLadbButton.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    /**
+     * 检查设备连接状态
+     */
+    private fun checkDeviceConnectionStatus() {
+        mainScope.launch {
+            try {
+                val isConnected = shellExecutor.getDevices().isNotEmpty()
+
+                runOnUiThread {
+                    if (isConnected) {
+                        deviceStatusImageView.visibility = View.VISIBLE
+                        deviceStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                        deviceStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_green_dark))
+                        connectDeviceButton.visibility = View.GONE
+                    } else {
+                        deviceStatusImageView.visibility = View.VISIBLE
+                        deviceStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                        deviceStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                        connectDeviceButton.visibility = View.VISIBLE
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    deviceStatusImageView.visibility = View.VISIBLE
+                    deviceStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                    deviceStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                    connectDeviceButton.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    /**
+     * 检查输入法安装状态
+     */
+    private fun checkInputMethodStatus() {
+        try {
+            val deviceController = DeviceController(this@MainActivity)
+            val isImeInstalled = deviceController.isADBKeyboardInstalled()
+
+            runOnUiThread {
+                if (isImeInstalled) {
+                    imeStatusImageView.visibility = View.VISIBLE
+                    imeStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                    imeStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_green_dark))
+                    installImeButton.visibility = View.GONE
+                } else {
+                    imeStatusImageView.visibility = View.VISIBLE
+                    imeStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                    imeStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                    installImeButton.visibility = View.VISIBLE
+                }
+            }
+        } catch (e: Exception) {
+            runOnUiThread {
+                imeStatusImageView.visibility = View.VISIBLE
+                imeStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
+                imeStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                installImeButton.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    /**
+     * 设置 LADB
+     */
+    private fun setupLadb() {
+        ErrorDialog.showLadbNotAvailable(this)
+    }
+
+    /**
+     * 连接设备
+     */
+    private fun connectDevice() {
+        mainScope.launch {
+            try {
+                // 尝试初始化并连接设备
+                val initSuccess = shellExecutor.initialize()
+                if (initSuccess) {
+                    val devices = shellExecutor.getDevices()
+                    if (devices.isNotEmpty()) {
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "设备连接成功", Toast.LENGTH_SHORT).show()
+                            checkDeviceConnectionStatus() // 重新检查状态
+                        }
+                    } else {
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "未发现设备，请检查USB调试或无线调试设置", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "LADB 初始化失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "连接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * 安装输入法
+     */
+    private fun installInputMethod() {
+        // 先检查是否有安装权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!packageManager.canRequestPackageInstalls()) {
+                // 没有权限，先请求权限
+                requestInstallPermission()
+                return
+            }
+        }
+
+        // 有权限，直接安装
+        performInputMethodInstallation()
+    }
+
+    /**
+     * 执行输入法安装
+     */
+    private fun performInputMethodInstallation() {
+        mainScope.launch {
+            try {
+                val deviceController = DeviceController(this@MainActivity)
+                val installSuccess = deviceController.initializeInputMethod()
+
+                runOnUiThread {
+                    if (installSuccess) {
+                        Toast.makeText(this@MainActivity, "输入法安装成功", Toast.LENGTH_SHORT).show()
+                        checkInputMethodStatus() // 重新检查状态
+                    } else {
+                        Toast.makeText(this@MainActivity, "输入法安装失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "输入法安装失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * 主动请求安装未知来源应用权限
+     */
+    private fun requestInstallPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 显示说明对话框
+            AlertDialog.Builder(this)
+                .setTitle("需要安装权限")
+                .setMessage("为了安装 ADBKeyboard 输入法，需要授予「安装未知来源应用」权限。\n\n请在接下来的弹窗中允许此权限。")
+                .setPositiveButton("去授权") { _, _ ->
+                    // 主动请求权限
+                    try {
+                        val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                            data = android.net.Uri.parse("package:$packageName")
+                        }
+                        startActivityForResult(intent, REQUEST_INSTALL_PERMISSION)
+                    } catch (e: Exception) {
+                        // 如果无法直接跳转到权限页面，则跳转到应用详情页面
+                        try {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = android.net.Uri.parse("package:$packageName")
+                            }
+                            startActivityForResult(intent, REQUEST_INSTALL_PERMISSION)
+                        } catch (e2: Exception) {
+                            Toast.makeText(this, "无法打开设置页面，请手动前往设置开启权限", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        when (requestCode) {
+            REQUEST_INSTALL_PERMISSION -> {
+                // 权限请求结果处理
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    if (packageManager.canRequestPackageInstalls()) {
+                        Toast.makeText(this, "权限已授予，正在安装...", Toast.LENGTH_SHORT).show()
+                        // 权限已授予，继续安装
+                        performInputMethodInstallation()
+                    } else {
+                        Toast.makeText(this, "权限被拒绝，无法安装输入法", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
+
 
     override fun onDestroy() {
         super.onDestroy()
