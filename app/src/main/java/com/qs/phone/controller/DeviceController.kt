@@ -829,16 +829,7 @@ class DeviceController(
         return try {
             // 使用原生 Android API 检查应用是否已安装
             val packageManager = context.packageManager
-            for ( appInfo in packageManager.getInstalledApplications(0)) {
-                // 应用名称（解析字符串资源）
-                var appName = packageManager.getApplicationLabel(appInfo).toString();
-                // 应用包名
-                var packageName = appInfo.packageName;
-                // 判断是否为系统应用
-                var isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0;
-
-                Log.d("InstalledApp", "名称：" + appName + " | 包名：" + packageName + " | 系统应用：" + isSystemApp);}
-            Log.e(TAG, packageManager.getPackageInfo("com.android.adbkeyboard", 0).toString())
+            packageManager.getPackageInfo("com.android.adbkeyboard", 0)
             true
         } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
             // 应用未安装

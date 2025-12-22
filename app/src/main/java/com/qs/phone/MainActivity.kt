@@ -735,7 +735,6 @@ class MainActivity : AppCompatActivity() {
                 if (success) {
                     val devices = shell.getDevices()
                     statusText.text = "✅ DNS连接成功！\n\n发现设备:\n${devices.joinToString("\n")}"
-                    checkLadbStatus()
                 } else {
                     statusText.text =
                         "❌ DNS连接失败\n\n请确保：\n• 无线调试已开启\n• 已配对本机设备\n• 网络连接正常"
@@ -1024,31 +1023,216 @@ class MainActivity : AppCompatActivity() {
      * 连接设备
      */
     private fun connectDevice() {
+        // 第一步：检查开发者选项是否开启
+        val developerOptionsEnabled = shellExecutor.checkUSBDebuggingEnabled()
+        val wirelessDebuggingEnabled = shellExecutor.checkWirelessDebuggingEnabled()
+
+        if (!developerOptionsEnabled && !wirelessDebuggingEnabled) {
+            // 开发者选项未开启
+            AlertDialog.Builder(this)
+                .setTitle("需要开启开发者选项")
+                .setMessage("为了使用 ADB 调试功能，需要先开启开发者选项。\n\n请在接下来的设置页面中：\n1. 连续点击「版本号」7次开启开发者选项\n2. 返回上一层开启「USB调试」或「无线调试」")
+                .setPositiveButton("去开启") { _, _ ->
+                    // 跳转到开发者选项设置
+                    try {
+                        val intent = Intent(Settings.ACTION_APPLICATION_SETTINGS)
+                        startActivity(intent)
+                        Toast.makeText(this, "请在设置中开启「开发者选项」和「USB调试」", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this, "无法打开设置页面", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            return
+        }
+
+        // 开发者选项已开启，开始第二步
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+：使用无线调试
+            if (!wirelessDebuggingEnabled) {
+                AlertDialog.Builder(this)
+                    .setTitle("开启无线调试")
+                    .setMessage("检测到 Android 11+ 系统，建议使用无线调试功能。\n\n请在开发者选项中开启「无线调试」，然后点击确定继续。")
+                    .setPositiveButton("我已开启") { _, _ ->
+                        // 重新检查并执行
+                        connectDevice()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            } else {
+                // 已开启无线调试，执行DNS连接
+                Toast.makeText(this, "正在连接无线调试设备...", Toast.LENGTH_SHORT).show()
+                showDnsConnectionDialog()
+            }
+        } else {
+            // Android 10 及以下：使用USB调试
+            connectWithUSB()
+        }
+    }
+
+    /**
+     * 使用USB调试连接（Android 10及以下）
+     */
+    private fun connectWithUSB() {
         mainScope.launch {
             try {
-                // 尝试初始化并连接设备
-                val initSuccess = shellExecutor.initialize()
-                if (initSuccess) {
-                    val devices = shellExecutor.getDevices()
-                    if (devices.isNotEmpty()) {
-                        runOnUiThread {
-                            Toast.makeText(this@MainActivity, "设备连接成功", Toast.LENGTH_SHORT).show()
-                            checkDeviceConnectionStatus() // 重新检查状态
+                Toast.makeText(this@MainActivity, "正在启用USB调试模式...", Toast.LENGTH_SHORT).show()
+
+                // 先检查当前设备列表状态
+                val currentDevices = shellExecutor.getDevices()
+                Log.d("MainActivity", "当前设备列表: $currentDevices")
+
+                // 执行 adb tcpip 5555
+                val tcpipResult = shellExecutor.executeADB("tcpip 5555")
+                if (tcpipResult.success) {
+                    Toast.makeText(this@MainActivity, "TCP/IP模式已启用，等待设备... (10秒)", Toast.LENGTH_SHORT).show()
+
+                    // 等待端口启动，增加时间
+                    kotlinx.coroutines.delay(3000)
+
+                    // 多次尝试连接，等待授权
+                    var connected = false
+                    var attempts = 3
+                    var lastError = ""
+
+                    while (attempts > 0 && !connected) {
+                        // 重新获取设备列表
+                        val devicesBeforeConnect = shellExecutor.getDevices()
+                        Log.d("MainActivity", "尝试连接前的设备列表: $devicesBeforeConnect")
+
+                        // 尝试连接到本地 5555 端口
+                        connected = shellExecutor.connectToDevice("localhost", 5555)
+
+                        if (!connected) {
+                            // 检查连接错误原因
+                            val devicesAfterConnect = shellExecutor.getDevices()
+                            Log.d("MainActivity", "连接失败后设备列表: $devicesAfterConnect")
+
+                            // 如果是授权问题，提示用户
+                            if (devicesAfterConnect.isEmpty()) {
+                                lastError = "连接被拒绝或未授权"
+                            } else {
+                                val unauthorizedDevices = devicesAfterConnect.filter { it.contains("unauthorized") }
+                                if (unauthorizedDevices.isNotEmpty()) {
+                                    lastError = "设备需要授权，请确认手机上的授权弹窗"
+                                } else {
+                                    lastError = "连接超时，请检查网络连接"
+                                }
+                            }
+
+                            attempts--
+                            if (attempts > 0) {
+                                Toast.makeText(this@MainActivity, "连接失败，正在重试... (剩余${attempts}次)\n错误: $lastError", Toast.LENGTH_SHORT).show()
+                                kotlinx.coroutines.delay(2000)
+                            }
+                        } else {
+                            // 等待一下确保连接完成
+                            kotlinx.coroutines.delay(1000)
+                            val finalDevices = shellExecutor.getDevices()
+                            Log.d("MainActivity", "连接后的设备列表: $finalDevices")
+
+                            // 检查是否有 unauthorized 标记
+                            if (finalDevices.any { it.contains("unauthorized") }) {
+                                connected = false
+                                lastError = "设备未授权，请确认手机上的授权弹窗"
+                                attempts--
+                                if (attempts > 0) {
+                                    Toast.makeText(this@MainActivity, "⚠️ 未授权，请确认手机上的授权弹窗", Toast.LENGTH_LONG).show()
+                                    kotlinx.coroutines.delay(3000)
+                                }
+                            } else {
+                                break
+                            }
                         }
+                    }
+
+                    // 根据连接结果显示提示
+                    val finalDevices = shellExecutor.getDevices()
+                    if (finalDevices.isNotEmpty() && !finalDevices.any { it.contains("unauthorized") }) {
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "✅ 设备连接成功", Toast.LENGTH_SHORT).show()
+                            checkDeviceConnectionStatus()
+                        }
+                    } else if (finalDevices.any { it.contains("unauthorized") }) {
+                        // 显示授权提示对话框
+                        showAuthorizationDialog()
                     } else {
                         runOnUiThread {
-                            Toast.makeText(this@MainActivity, "未发现设备，请检查USB调试或无线调试设置", Toast.LENGTH_LONG).show()
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("连接失败")
+                                .setMessage("无法连接到设备，可能原因：\n\n1. 设备未授权ADB连接\n2. 授权弹窗被忽略或跳过\n3. 网络连接问题\n\n解决方案：\n1. 在手机上确认授权弹窗（必须启用\"始终允许\"）\n2. 重新插拔USB线\n3. 运行adb kill-server后重试")
+                                .setPositiveButton("清除授权并重试") { _, _ ->
+                                    clearAuthorizations()
+                                }
+                                .setNegativeButton("好的", null)
+                                .show()
                         }
                     }
                 } else {
                     runOnUiThread {
-                        Toast.makeText(this@MainActivity, "LADB 初始化失败", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "TCP/IP 启动失败：${tcpipResult.stderr}", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "连接失败: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
+            }
+        }
+    }
+
+    /**
+     * 显示授权提示对话框
+     */
+    private fun showAuthorizationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("需要授权确认")
+            .setMessage("设备已连接，但需要完成授权确认。\n\n请按以下步骤操作：\n1. 查看手机屏幕，应该有授权弹窗\n2. 勾选「总是允许此计算机」\n3. 点击「确定」\n\n如果未看到弹窗，请：\n• 重新插拔 USB 线\n• 或调用 adb kill-server 后重试")
+            .setPositiveButton("重新连接") { _, _ ->
+                connectDevice()
+            }
+            .setNeutralButton("检查设备列表") { _, _ ->
+                mainScope.launch {
+                    val devices = shellExecutor.getDevices()
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("当前设备列表")
+                        .setMessage(if (devices.isEmpty()) "未检测到设备" else devices.joinToString("\n"))
+                        .setPositiveButton("确定", null)
+                        .show()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 清除已授权的设备列表
+     */
+    private fun clearAuthorizations() {
+        mainScope.launch {
+            try {
+                Toast.makeText(this@MainActivity, "正在清除授权...", Toast.LENGTH_SHORT).show()
+
+                // 停止ADB服务器
+                val killResult = shellExecutor.executeADB("kill-server")
+                if (killResult.success) {
+                    kotlinx.coroutines.delay(2000)
+
+                    // 尝试重新启动服务器
+                    val startResult = shellExecutor.executeADB("start-server")
+                    if (startResult.success) {
+                        Toast.makeText(this@MainActivity, "已清除授权，请重新连接设备", Toast.LENGTH_SHORT).show()
+                        // 重新连接
+                        connectDevice()
+                    } else {
+                        Toast.makeText(this@MainActivity, "重新启动服务器失败：${startResult.stderr}", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Toast.makeText(this@MainActivity, "清除授权失败：${killResult.stderr}", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "清除授权时出错：${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
