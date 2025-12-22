@@ -86,25 +86,7 @@ class PhoneAgent(
      */
     suspend fun initialize(): Boolean {
         Log.d(TAG, "Initializing PhoneAgent...")
-        val success = deviceController.initialize()
-        if (success) {
-            log("✅ 设备控制器初始化成功")
-            if (deviceController.isLadbAvailable()) {
-                log("ℹ️ 使用 LADB 模式（无需 Root）")
-            } else {
-                log("⚠️ 使用传统模式（需要 Root 或 Shizuku）")
-            }
-
-            val devices = deviceController.getDevices()
-            if (devices.isNotEmpty()) {
-                log("📱 检测到设备: $devices")
-            } else {
-                log("⚠️ 未检测到 ADB 设备")
-            }
-        } else {
-            log("❌ 设备控制器初始化失败")
-        }
-        return success
+        return deviceController.initialize()
     }
 
     /**

@@ -765,6 +765,7 @@ class FloatingWindowService : AccessibilityService() {
                         appendLog("ℹ️ 使用 LADB 模式（无需 Root）")
                     } else {
                         appendLog("⚠️ LADB 不可用，需要 Root 权限或安装 LADB")
+                        return@launch
                     }
 
                     // 检查设备连接
@@ -773,8 +774,15 @@ class FloatingWindowService : AccessibilityService() {
                         appendLog("📱 检测到设备: $devices")
                     } else {
                         appendLog("⚠️ 未检测到 ADB 设备，请检查调试设置")
+                        return@launch
                     }
-                    Log.e(TAG, "Agent state: " + agent?.state)
+                    //检查输入法安装状态
+                    if (agent?.deviceController?.isADBKeyboardInstalled() == true){
+                        appendLog("✅ ADBKeyboard 已安装")
+                    } else {
+                        appendLog("⚠️ ADBKeyboard未安装，请检查")
+                        return@launch
+                    }
                     // 收集日志 - 创建 Job 引用以便管理
                     logCollectionJob = serviceScope.launch {
                         agent?.logs?.collectLatest { logs ->
@@ -784,7 +792,6 @@ class FloatingWindowService : AccessibilityService() {
                             }
                         }
                     }
-                    Log.e(TAG, "Agent state2: " + agent?.state)
 
                     // 收集状态 - 创建 Job 引用以便管理
                     stateCollectionJob = serviceScope.launch {
@@ -840,7 +847,6 @@ class FloatingWindowService : AccessibilityService() {
                             }
                         }
                     }
-                    Log.e(TAG, "Agent state: " + agent?.state)
 
                     // 运行 Agent
                     agentJob = serviceScope.launch(Dispatchers.IO) {
@@ -867,8 +873,9 @@ class FloatingWindowService : AccessibilityService() {
                     appendLog("❌ Agent 初始化失败")
                     appendLog("💡 请确保：")
                     appendLog("   • 已安装 LADB 应用")
-                    appendLog("   • 或已获取 Root 权限")
+                    appendLog("   • 设备已连接")
                     appendLog("   • 已在开发者选项中启用调试")
+                    appendLog("   • 已安装输入法")
                 }
             } catch (e: Exception) {
                 appendLog("❌ 初始化错误: ${e.message}")
@@ -935,6 +942,7 @@ class FloatingWindowService : AccessibilityService() {
     fun clearLogs() {
         logTextView?.text = ""
         appendLog("🤝 你好,我是你的AI助手.\n你可以让我执行一些简单的操作哦!\n"+"🎉比如点杯奶茶,自己刷会抖音,微信回复XX信息.\n    任务开始窗口会自动隐藏\n    运行中不要打开本窗口\n    否则会阻塞程序正常执行")
+        inputEditText?.text?.clear()
     }
 
     private fun updateStatusIndicator(isRunning: Boolean) {
