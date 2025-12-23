@@ -139,10 +139,10 @@ class ShellExecutor(private val context: Context) {
             Log.d(TAG, "Command : $command")
             Log.d(TAG, "Exit code: $exitCode")
 //            Log.e(TAG, "stderr: $stderr")
-            Log.d(TAG, "stderr: $stdout")
+            Log.d(TAG, "stderr: $stdout"+"${stdout.contains("Connection refused")}")
 
             ShellResult(
-                success = exitCode == 0,
+                success = exitCode == 0 && !stdout.contains("Connection refused") &&!stdout.contains("failed to connect"),
                 stdout = stdout,
                 stderr = stderr,
                 exitCode = exitCode
@@ -177,10 +177,10 @@ class ShellExecutor(private val context: Context) {
             val result = executeCommand(listOf("connect", address))
 
             if (result.success) {
-                Log.d(TAG, "Connected to $address")
+                Log.d(TAG, "Connecte1d to $address")
                 true
             } else {
-                Log.w(TAG, "Failed to connect: ${result.stderr}")
+                Log.w(TAG, "Faile1d to connect: ${result.stderr}")
                 false
             }
         } catch (e: Exception) {

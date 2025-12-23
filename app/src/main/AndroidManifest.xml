@@ -22,6 +22,8 @@
 
     <!-- 安装未知来源应用权限 (Android 8.0+) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 通知权限 (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <!--    dns 连接设备权限-->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <!-- 声明需要查询的应用包名 -->
