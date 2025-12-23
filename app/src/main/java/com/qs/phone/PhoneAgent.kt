@@ -1,22 +1,24 @@
 package com.qs.phone
 
 import android.content.Context
+import android.net.nsd.NsdManager
 import android.util.Log
-import android.view.accessibility.AccessibilityWindowInfo
 import com.qs.phone.action.ActionHandler
 import com.qs.phone.action.ActionParser
 import com.qs.phone.config.AppPackages
 import com.qs.phone.config.Prompts
 import com.qs.phone.controller.DeviceController
+import com.qs.phone.discovery.DnsDiscoveryManager
 import com.qs.phone.model.MessageBuilder
 import com.qs.phone.model.ModelClient
 import com.qs.phone.model.ModelConfig
-import com.qs.phone.service.FloatingWindowService
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.Timer
+import kotlin.concurrent.scheduleAtFixedRate
 
 /**
  * Agent 配置
@@ -60,7 +62,8 @@ class PhoneAgent(
     private val modelConfig: ModelConfig,
     private val agentConfig: AgentConfig = AgentConfig(),
     private val onConfirmation: ((String) -> Boolean)? = null,
-    private val onTakeover: ((String) -> Unit)? = null
+    private val onTakeover: ((String) -> Unit)? = null,
+    private val onAdbPortDiscovered: ((Map<String, List<Int>>) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "PhoneAgent"
@@ -70,8 +73,21 @@ class PhoneAgent(
     private val modelClient = ModelClient(modelConfig)
     private val actionHandler = ActionHandler(deviceController, onConfirmation, onTakeover)
 
+    // DNS 端口发现管理器
+    private val nsdManager: NsdManager by lazy {
+        context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    }
+    private val dnsDiscoveryManager: DnsDiscoveryManager by lazy {
+        DnsDiscoveryManager(context, nsdManager)
+    }
+
     private val conversationContext = mutableListOf<Map<String, Any>>()
     private var stepCount = 0
+
+    // 端口监听相关
+    private var portMonitorTimer: Timer? = null
+    private var isMonitoringPorts = false
+    private var lastKnownPorts: Set<Int> = emptySet()
 
     val _state = MutableStateFlow<AgentState>(AgentState.Idle)
     val state: StateFlow<AgentState> = _state
@@ -86,7 +102,15 @@ class PhoneAgent(
      */
     suspend fun initialize(): Boolean {
         Log.d(TAG, "Initializing PhoneAgent...")
-        return deviceController.initialize()
+        val success = deviceController.initialize()
+
+        if (success) {
+            // 启动 ADB 端口监听
+            startAdbPortMonitoring()
+            Log.d(TAG, "ADB port monitoring started")
+        }
+
+        return success
     }
 
     /**
@@ -314,6 +338,7 @@ class PhoneAgent(
      * 清理资源
      */
     fun cleanup() {
+        cleanupPortMonitoring()
         deviceController.cleanup()
     }
 
@@ -363,5 +388,166 @@ class PhoneAgent(
         } catch (e: Exception) {
             log("⚠️ 恢复输入法时发生异常: ${e.message}")
         }
+    }
+
+    // ========================================
+    // ADB 端口监听相关方法
+    // ========================================
+
+    /**
+     * 启动 ADB 端口监听
+     */
+    private fun startAdbPortMonitoring() {
+        if (isMonitoringPorts) {
+            Log.w(TAG, "Port monitoring already started")
+            return
+        }
+
+        try {
+            // 启动 DNS 服务发现
+            val scanResult = dnsDiscoveryManager.scanAdbPorts()
+            if (scanResult.success) {
+                Log.i(TAG, "Started ADB port discovery: ${scanResult.message}")
+                log("🔍 开始监听 ADB 端口...")
+            } else {
+                Log.w(TAG, "Failed to start port discovery: ${scanResult.message}")
+                return
+            }
+
+            // 启动定时检查
+            isMonitoringPorts = true
+            portMonitorTimer = Timer().apply {
+                scheduleAtFixedRate(0, 2000) { // 每 2 秒检查一次
+                    checkPortChanges()
+                }
+            }
+            Log.d(TAG, "Port monitoring timer started")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start port monitoring", e)
+            log("❌ 启动端口监听失败: ${e.message}")
+        }
+    }
+
+    /**
+     * 停止 ADB 端口监听
+     */
+    private fun stopAdbPortMonitoring() {
+        if (!isMonitoringPorts) {
+            return
+        }
+
+        try {
+            portMonitorTimer?.cancel()
+            portMonitorTimer = null
+            isMonitoringPorts = false
+
+            dnsDiscoveryManager.stopScan()
+            Log.d(TAG, "Stopped ADB port monitoring")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop port monitoring", e)
+        }
+    }
+
+    /**
+     * 检查端口变化
+     */
+    private fun checkPortChanges() {
+        try {
+            // 获取所有端口信息
+            val allPorts = dnsDiscoveryManager.getAllDiscoveredPorts()
+            val currentPorts = allPorts["all"]?.toSet() ?: emptySet()
+
+            // 检查是否有新端口或端口消失
+            if (currentPorts != lastKnownPorts) {
+                val addedPorts = currentPorts - lastKnownPorts
+                val removedPorts = lastKnownPorts - currentPorts
+
+                if (addedPorts.isNotEmpty()) {
+                    Log.i(TAG, "新发现端口: $addedPorts")
+                    log("📡 发现 ADB 端口: $addedPorts")
+                }
+
+                if (removedPorts.isNotEmpty()) {
+                    Log.i(TAG, "端口消失: $removedPorts")
+                    log("📡 ADB 端口消失: $removedPorts")
+                }
+
+                // 更新最后已知端口
+                lastKnownPorts = currentPorts
+
+                // 通知回调（如果提供了）
+                onAdbPortDiscovered?.let { callback ->
+                    callback(allPorts)
+                }
+            }
+
+            // 定期输出当前端口状态（调试用）
+            if (currentPorts.isNotEmpty() && agentConfig.verbose) {
+                val pairingPorts = allPorts["pairing"] ?: emptyList()
+                val connectPorts = allPorts["connect"] ?: emptyList()
+
+                if (pairingPorts.isNotEmpty()) {
+                    Log.d(TAG, "配对端口: $pairingPorts")
+                }
+                if (connectPorts.isNotEmpty()) {
+                    Log.d(TAG, "连接端口: $connectPorts")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking port changes", e)
+        }
+    }
+
+    /**
+     * 获取当前发现的 ADB 端口列表
+     */
+    fun getDiscoveredAdbPorts(): Map<String, List<Int>> {
+        return try {
+            dnsDiscoveryManager.getAllDiscoveredPorts()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get discovered ports", e)
+            emptyMap()
+        }
+    }
+
+    /**
+     * 获取最佳 ADB 端口
+     */
+    fun getBestAdbPort(): Int? {
+        return try {
+            dnsDiscoveryManager.getBestPort()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get best port", e)
+            null
+        }
+    }
+
+    /**
+     * 手动触发端口重新扫描
+     */
+    fun rescanAdbPorts(): Boolean {
+        return try {
+            Log.d(TAG, "Manual rescan of ADB ports")
+            log("🔄 重新扫描 ADB 端口...")
+            dnsDiscoveryManager.clearPorts()
+            val result = dnsDiscoveryManager.scanAdbPorts()
+            result.success
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to rescan ports", e)
+            false
+        }
+    }
+
+    /**
+     * 检查端口监听是否正在运行
+     */
+    fun isMonitoringAdbPorts(): Boolean = isMonitoringPorts
+
+    /**
+     * 清理资源时停止端口监听
+     */
+    private fun cleanupPortMonitoring() {
+        stopAdbPortMonitoring()
+        lastKnownPorts = emptySet()
     }
 }

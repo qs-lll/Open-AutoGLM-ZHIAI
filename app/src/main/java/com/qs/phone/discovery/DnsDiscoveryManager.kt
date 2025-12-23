@@ -22,7 +22,8 @@ class DnsDiscoveryManager(
 ) {
     companion object {
         private const val TAG = "DnsDiscoveryManager"
-        private const val SERVICE_TYPE = "_adb-tls-connect._tcp"
+        private const val CONNECT_SERVICE_TYPE = "_adb-tls-connect._tcp"      // 连接服务
+        private const val PAIRING_SERVICE_TYPE = "_adb-tls-pairing._tcp"      // 配对服务
         private val pendingResolves = AtomicBoolean(false)
     }
 
@@ -33,8 +34,12 @@ class DnsDiscoveryManager(
     private var pendingServices: MutableList<NsdServiceInfo> =
         Collections.synchronizedList(ArrayList())
 
+    // 新增：配对服务列表
+    private val pairingServices: MutableList<NsdServiceInfo> =
+        Collections.synchronizedList(ArrayList())
+
     /**
-     * 扫描 ADB 端口
+     * 扫描 ADB 连接端口
      */
     fun scanAdbPorts(): ScanResult {
         clearPorts()
@@ -47,15 +52,45 @@ class DnsDiscoveryManager(
         startTime = System.currentTimeMillis()
 
         try {
+            // 只监听连接服务类型
             nsdManager.discoverServices(
-                SERVICE_TYPE,
+                CONNECT_SERVICE_TYPE,
                 NsdManager.PROTOCOL_DNS_SD,
                 discoveryListener
             )
-            Log.d(TAG, "Started DNS service discovery")
-            return ScanResult(true, emptyList(), "Scan started")
+            Log.d(TAG, "Started DNS service discovery for connect services")
+            return ScanResult(true, emptyList(), "Scan started for connect services")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start DNS discovery", e)
+            started = false
+            return ScanResult(false, emptyList(), e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * 扫描 ADB 配对端口
+     */
+    fun scanPairingPorts(): ScanResult {
+        clearPorts()
+        if (started) {
+            Log.w(TAG, "DNS scan already started")
+            return ScanResult(false, emptyList(), "Scan already in progress")
+        }
+
+        started = true
+        startTime = System.currentTimeMillis()
+
+        try {
+            // 只监听配对服务类型
+            nsdManager.discoverServices(
+                PAIRING_SERVICE_TYPE,
+                NsdManager.PROTOCOL_DNS_SD,
+                pairingDiscoveryListener
+            )
+            Log.d(TAG, "Started DNS service discovery for pairing services")
+            return ScanResult(true, emptyList(), "Scan started for pairing services")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start pairing discovery", e)
             started = false
             return ScanResult(false, emptyList(), e.message ?: "Unknown error")
         }
@@ -68,11 +103,28 @@ class DnsDiscoveryManager(
         if (!started) return
 
         try {
+            // 停止服务发现监听器
             nsdManager.stopServiceDiscovery(discoveryListener)
             started = false
             Log.d(TAG, "Stopped DNS service discovery")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop DNS discovery", e)
+        }
+    }
+
+    /**
+     * 停止配对服务扫描
+     */
+    fun stopPairingScan() {
+        if (!started) return
+
+        try {
+            // 停止配对服务发现监听器
+            nsdManager.stopServiceDiscovery(pairingDiscoveryListener)
+            started = false
+            Log.d(TAG, "Stopped pairing DNS service discovery")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop pairing DNS discovery", e)
         }
     }
 
@@ -93,6 +145,7 @@ class DnsDiscoveryManager(
      */
     fun clearPorts() {
         ports.clear()
+        pairingServices.clear()
         bestPort = null
         Log.d(TAG, "Cleared port list")
     }
@@ -239,37 +292,105 @@ class DnsDiscoveryManager(
 
     private val discoveryListener = object : NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(regType: String) {
-            Log.d(TAG, "Service discovery started: $regType")
+            Log.d(TAG, "Connect service discovery started: $regType")
         }
 
         override fun onServiceFound(service: NsdServiceInfo) {
-            Log.d(TAG, "Service found: ${service.serviceName}, port: ${service.port}")
+            Log.d(TAG, "Connect service found: ${service.serviceName}, type: ${service.serviceType}, port: ${service.port}")
 
+            // 只处理连接服务类型
             pendingServices.add(service)
             pendingResolves.set(true)
-
             resolveService(service)
         }
 
         override fun onServiceLost(service: NsdServiceInfo) {
-            Log.e(TAG, "Service lost: ${service.serviceName}")
+            Log.e(TAG, "Connect service lost: ${service.serviceName}")
+            pendingServices.removeAll { it.serviceName == service.serviceName }
         }
 
         override fun onDiscoveryStopped(serviceType: String) {
-            Log.i(TAG, "Discovery stopped: $serviceType")
+            Log.i(TAG, "Connect discovery stopped: $serviceType")
             started = false
         }
 
         override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-            Log.e(TAG, "Discovery failed: Error code: $errorCode")
+            Log.e(TAG, "Connect discovery failed for $serviceType: Error code: $errorCode")
             nsdManager.stopServiceDiscovery(this)
             started = false
         }
 
         override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-            Log.e(TAG, "Stop discovery failed: Error code: $errorCode")
+            Log.e(TAG, "Stop connect discovery failed for $serviceType: Error code: $errorCode")
             nsdManager.stopServiceDiscovery(this)
         }
+    }
+
+    /**
+     * 配对服务发现监听器
+     */
+    private val pairingDiscoveryListener = object : NsdManager.DiscoveryListener {
+        override fun onDiscoveryStarted(regType: String) {
+            Log.d(TAG, "Pairing service discovery started: $regType")
+        }
+
+        override fun onServiceFound(service: NsdServiceInfo) {
+            Log.d(TAG, "Pairing service found: ${service.serviceName}, type: ${service.serviceType}, port: ${service.port}")
+
+            // 配对服务直接添加到列表
+            if (service.port > 0) {
+                pairingServices.add(service)
+                Log.i(TAG, "Added pairing service: ${service.serviceName} at port ${service.port}")
+            } else {
+                Log.w(TAG, "Ignoring pairing service with invalid port: ${service.port}")
+            }
+        }
+
+        override fun onServiceLost(service: NsdServiceInfo) {
+            Log.e(TAG, "Pairing service lost: ${service.serviceName}")
+            pairingServices.removeAll { it.serviceName == service.serviceName }
+        }
+
+        override fun onDiscoveryStopped(serviceType: String) {
+            Log.i(TAG, "Pairing discovery stopped: $serviceType")
+        }
+
+        override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+            Log.e(TAG, "Pairing discovery failed for $serviceType: Error code: $errorCode")
+            nsdManager.stopServiceDiscovery(this)
+            started = false
+        }
+
+        override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+            Log.e(TAG, "Stop pairing discovery failed for $serviceType: Error code: $errorCode")
+            nsdManager.stopServiceDiscovery(this)
+        }
+    }
+
+    /**
+     * 获取发现的所有端口（含配对和连接）
+     */
+    fun getAllDiscoveredPorts(): Map<String, List<Int>> {
+        return mapOf(
+            "pairing" to pairingServices.mapNotNull { it.port }.filter { it > 0 },
+            "connect" to ports.toList(),
+            "all" to (ports + pairingServices.mapNotNull { it.port })
+                .filter { it > 0 }
+        )
+    }
+
+    /**
+     * 获取配对端口列表
+     */
+    fun getPairingPorts(): List<Int> {
+        return pairingServices.mapNotNull { it.port }.filter { it > 0 }
+    }
+
+    /**
+     * 获取连接端口列表
+     */
+    fun getConnectPorts(): List<Int> {
+        return ports.toList()
     }
 }
 
