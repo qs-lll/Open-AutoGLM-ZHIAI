@@ -16,6 +16,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.qs.phone.service.FloatingWindowService
+import com.qs.phone.service.WirelessAdbPairingService
 import com.qs.phone.shell.ShellExecutor
 import com.qs.phone.discovery.DnsDiscoveryManager
 import com.qs.phone.ui.DiagnosticTool
@@ -49,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ladbStatusText: TextView
     private lateinit var ladbHelpButton: Button
     private lateinit var dnsConnectButton: Button
+    private lateinit var continuousSearchButton: Button
     private lateinit var connectButton: Button
     private lateinit var disconnectButton: Button
     private lateinit var listDevicesButton: Button
@@ -78,6 +80,10 @@ class MainActivity : AppCompatActivity() {
     private var dnsSearchJob: kotlinx.coroutines.Job? = null
     private var isDnsSearching = false
     private var dnsDiscoveryManager: DnsDiscoveryManager? = null
+
+    // 持续搜索相关变量
+    private var continuousSearchJob: kotlinx.coroutines.Job? = null
+    private var isContinuousSearching = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,6 +124,7 @@ class MainActivity : AppCompatActivity() {
         ladbStatusText = findViewById(R.id.ladbStatusText)
         ladbHelpButton = findViewById(R.id.ladbHelpButton)
         dnsConnectButton = findViewById(R.id.dnsConnectButton)
+        continuousSearchButton = findViewById(R.id.continuousSearchButton)
         connectButton = findViewById(R.id.connectButton)
         disconnectButton = findViewById(R.id.disconnectButton)
         listDevicesButton = findViewById(R.id.listDevicesButton)
@@ -173,6 +180,14 @@ class MainActivity : AppCompatActivity() {
 
         dnsConnectButton.setOnClickListener {
             showDnsConnectionDialog()
+        }
+
+        continuousSearchButton.setOnClickListener {
+            if (!isContinuousSearching) {
+                startContinuousSearch()
+            } else {
+                stopContinuousSearch()
+            }
         }
 
         connectButton.setOnClickListener {
@@ -376,6 +391,8 @@ class MainActivity : AppCompatActivity() {
                     checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED
                 dnsConnectButton.isEnabled =
                     enableControls && !isDnsSearching && hasNetworkPermission
+                continuousSearchButton.isEnabled =
+                    enableControls && !isContinuousSearching && hasNetworkPermission
                 connectButton.isEnabled = enableControls
                 disconnectButton.isEnabled = enableControls
                 listDevicesButton.isEnabled = enableControls
@@ -383,11 +400,13 @@ class MainActivity : AppCompatActivity() {
 
                 if (!ladbAvailable) {
                     dnsConnectButton.text = "需要 LADB 或 Root"
+                    continuousSearchButton.text = "需要 LADB 或 Root"
                     connectButton.text = "需要 LADB 或 Root"
                     disconnectButton.text = "需要 LADB 或 Root"
                     listDevicesButton.text = "需要 LADB 或 Root"
                 } else if (!hasNetworkPermission) {
                     dnsConnectButton.text = "需要网络权限"
+                    continuousSearchButton.text = "需要网络权限"
                 }
 
                 // 如果 LADB 不可用，显示诊断提示
@@ -841,6 +860,46 @@ class MainActivity : AppCompatActivity() {
 
         dnsConnectButton.text = "DNS 连接无线调试"
         dnsConnectButton.isEnabled = shellExecutor.isAdbLibraryAvailable()
+    }
+
+    /**
+     * 开始持续搜索设备
+     * 搜索条件：
+     * 1. 自动检测设备连接，成功时停止搜索
+     * 2. DNS服务发现方式
+     * 3. 用户手动停止
+     */
+    private fun startContinuousSearch() {
+        isContinuousSearching = true
+        continuousSearchButton.text = "停止搜索"
+        continuousSearchButton.isEnabled = true
+
+        // 启动配对服务
+        val intent = Intent(this, WirelessAdbPairingService::class.java).apply {
+            action = WirelessAdbPairingService.ACTION_START_PAIRING
+        }
+        startForegroundService(intent)
+
+        Log.d("MainActivity", "Started WirelessAdbPairingService")
+    }
+
+    /**
+     * 停止持续搜索
+     */
+    private fun stopContinuousSearch() {
+        isContinuousSearching = false
+
+        // 停止配对服务
+        val intent = Intent(this, WirelessAdbPairingService::class.java).apply {
+            action = WirelessAdbPairingService.ACTION_STOP_PAIRING
+        }
+        startService(intent)
+
+        continuousSearchButton.text = "🔍 持续搜索设备"
+        continuousSearchButton.isEnabled = shellExecutor.isAdbLibraryAvailable() &&
+                checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        Log.d("MainActivity", "Stopped WirelessAdbPairingService")
     }
 
     /**
@@ -1337,5 +1396,16 @@ class MainActivity : AppCompatActivity() {
         // 清理协程，避免内存泄漏
         dnsSearchJob?.cancel()
         dnsSearchJob = null
+        continuousSearchJob?.cancel()
+        continuousSearchJob = null
+
+        // 如果正在搜索，停止配对服务
+        if (isContinuousSearching) {
+            val intent = Intent(this, WirelessAdbPairingService::class.java).apply {
+                action = WirelessAdbPairingService.ACTION_STOP_PAIRING
+            }
+            startService(intent)
+            Log.d("MainActivity", "Stopped WirelessAdbPairingService on onDestroy")
+        }
     }
 }

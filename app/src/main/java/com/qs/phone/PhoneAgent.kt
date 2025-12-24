@@ -104,11 +104,6 @@ class PhoneAgent(
         Log.d(TAG, "Initializing PhoneAgent...")
         val success = deviceController.initialize()
 
-        if (success) {
-            // 启动 ADB 端口监听
-            startAdbPortMonitoring()
-            Log.d(TAG, "ADB port monitoring started")
-        }
 
         return success
     }

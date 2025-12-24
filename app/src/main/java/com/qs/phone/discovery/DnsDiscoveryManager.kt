@@ -81,11 +81,11 @@ class DnsDiscoveryManager(
         startTime = System.currentTimeMillis()
 
         try {
-            // 只监听配对服务类型
+            // 监听配对服务类型，并解析服务（如同scanAdbPorts）
             nsdManager.discoverServices(
                 PAIRING_SERVICE_TYPE,
                 NsdManager.PROTOCOL_DNS_SD,
-                pairingDiscoveryListener
+                discoveryListener
             )
             Log.d(TAG, "Started DNS service discovery for pairing services")
             return ScanResult(true, emptyList(), "Scan started for pairing services")
