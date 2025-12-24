@@ -1,6 +1,8 @@
 package com.qs.phone
 
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
@@ -1175,22 +1177,26 @@ class MainActivity : AppCompatActivity() {
      */
     private fun connectWithUSB() {
         mainScope.launch {
+            var progressDialog: AlertDialog? = null
             try {
-                Toast.makeText(this@MainActivity, "正在启用USB调试模式...", Toast.LENGTH_SHORT)
-                    .show()
+                // 创建进度对话框
+                progressDialog = AlertDialog.Builder(this@MainActivity)
+                    .setTitle("正在连接设备")
+                    .setMessage("正在启用USB调试模式...")
+                    .setCancelable(false)
+                    .create()
+                progressDialog?.show()
 
                 // 先检查当前设备列表状态
                 val currentDevices = shellExecutor.getDevicesSuspending()
                 Log.d("MainActivity", "当前设备列表: $currentDevices")
 
                 // 执行 adb tcpip 5555
+                progressDialog?.setMessage("正在启动TCP/IP模式...")
                 val tcpipResult = shellExecutor.executeADB("tcpip 5555")
+
                 if (tcpipResult.success) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "TCP/IP模式已启用，等待设备... (10秒)",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    progressDialog?.setMessage("TCP/IP模式已启用，等待设备响应...")
 
                     // 等待端口启动，增加时间
                     kotlinx.coroutines.delay(3000)
@@ -1201,6 +1207,8 @@ class MainActivity : AppCompatActivity() {
                     var lastError = ""
 
                     while (attempts > 0 && !connected) {
+                        progressDialog?.setMessage("正在尝试连接设备... (${4 - attempts}/3)")
+
                         // 重新获取设备列表
                         val devicesBeforeConnect = shellExecutor.getDevicesSuspending()
                         Log.d("MainActivity", "尝试连接前的设备列表: $devicesBeforeConnect")
@@ -1228,11 +1236,6 @@ class MainActivity : AppCompatActivity() {
 
                             attempts--
                             if (attempts > 0) {
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    "连接失败，正在重试... (剩余${attempts}次)\n错误: $lastError",
-                                    Toast.LENGTH_SHORT
-                                ).show()
                                 kotlinx.coroutines.delay(2000)
                             }
                         } else {
@@ -1247,11 +1250,6 @@ class MainActivity : AppCompatActivity() {
                                 lastError = "设备未授权，请确认手机上的授权弹窗"
                                 attempts--
                                 if (attempts > 0) {
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "⚠️ 未授权，请确认手机上的授权弹窗",
-                                        Toast.LENGTH_LONG
-                                    ).show()
                                     kotlinx.coroutines.delay(3000)
                                 }
                             } else {
@@ -1259,6 +1257,10 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     }
+
+                    // 关闭进度对话框
+                    progressDialog?.dismiss()
+                    progressDialog = null
 
                     // 根据连接结果显示提示
                     val finalDevices = shellExecutor.getDevicesSuspending()
@@ -1275,28 +1277,60 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread {
                             AlertDialog.Builder(this@MainActivity)
                                 .setTitle("连接失败")
-                                .setMessage("无法连接到设备，可能原因：\n\n1. 设备未授权ADB连接\n2. 授权弹窗被忽略或跳过\n3. 网络连接问题\n\n解决方案：\n1. 在手机上确认授权弹窗（必须启用\"始终允许\"）\n2. 重新插拔USB线\n3. 运行adb kill-server后重试")
+                                .setMessage("无法通过USB调试模式连接设备。\n\n可能原因：\n1. 设备未授权ADB连接\n2. 授权弹窗被忽略或跳过\n3. 系统限制或兼容性问题\n\n解决方案：\n\n方法一：\n请在电脑上执行以下命令后重试：\nadb tcpip 5555\n\n方法二：\n1. 重新插拔USB线\n2. 在手机上确认授权弹窗（勾选\"始终允许\")\n3. 运行adb kill-server后重试")
                                 .setPositiveButton("清除授权并重试") { _, _ ->
                                     clearAuthorizations()
+                                }
+                                .setNeutralButton("复制adb命令") { _, _ ->
+                                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText("ADB Command", "adb tcpip 5555")
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(this@MainActivity, "命令已复制到剪贴板", Toast.LENGTH_SHORT).show()
                                 }
                                 .setNegativeButton("好的", null)
                                 .show()
                         }
                     }
                 } else {
+                    // TCP/IP启动失败
+                    progressDialog?.dismiss()
+                    progressDialog = null
+
                     runOnUiThread {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "TCP/IP 启动失败：${tcpipResult.stderr}",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("TCP/IP模式启动失败")
+                            .setMessage("无法启动TCP/IP模式，错误信息：\n${tcpipResult.stderr}\n\n解决方案：\n\n1. 请在电脑上执行以下命令：\nadb tcpip 5555\n\n2. 然后在此应用中点击\"重新连接\"\n\n3. 如果仍失败，请检查：\n- USB调试是否已启用\n- 是否允许了USB调试授权\n- 设备是否支持无线调试")
+                            .setPositiveButton("复制adb命令") { _, _ ->
+                                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("ADB Command", "adb tcpip 5555")
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(this@MainActivity, "命令已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                            }
+                            .setNeutralButton("重新连接") { _, _ ->
+                                connectDevice()
+                            }
+                            .setNegativeButton("好的", null)
+                            .show()
                     }
                 }
             } catch (e: Exception) {
+                // 关闭进度对话框
+                progressDialog?.dismiss()
+                progressDialog = null
+
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "连接失败: ${e.message}", Toast.LENGTH_SHORT)
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("连接异常")
+                        .setMessage("连接过程中发生异常：\n${e.message}\n\n建议：\n1. 请确保已启用USB调试\n2. 检查设备连接状态\n3. 尝试重新插拔USB线\n4. 或从电脑执行：adb tcpip 5555")
+                        .setPositiveButton("重新连接") { _, _ ->
+                            connectDevice()
+                        }
+                        .setNegativeButton("好的", null)
                         .show()
                 }
+            } finally {
+                // 确保关闭进度对话框
+                progressDialog?.dismiss()
             }
         }
     }
