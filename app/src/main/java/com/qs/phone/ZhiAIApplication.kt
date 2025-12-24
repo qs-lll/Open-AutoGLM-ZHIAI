@@ -1,8 +1,11 @@
 package com.qs.phone
 
 import android.app.Application
+import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.qs.phone.shell.ShellExecutor
+import com.qs.phone.util.PermissionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +21,13 @@ class ZhiAIApplication : Application() {
         private const val TAG = "ZhiAIApplication"
         lateinit var instance: ZhiAIApplication
             private set
+
+        /**
+         * 检查是否需要申请权限
+         */
+        fun shouldRequestPermissions(context: Context): Boolean {
+            return !PermissionManager.hasStoragePermissions(context)
+        }
     }
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -28,6 +38,9 @@ class ZhiAIApplication : Application() {
         instance = this
 
         Log.d(TAG, "ZhiAI Application started")
+
+        // 检查并记录权限状态
+        checkPermissions()
 
         // 初始化 ShellExecutor（延后创建，避免阻塞启动）
         applicationScope.launch {
@@ -51,6 +64,32 @@ class ZhiAIApplication : Application() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize ShellExecutor", e)
             }
+        }
+    }
+
+    /**
+     * 检查应用权限状态
+     */
+    private fun checkPermissions() {
+        val hasPermissions = PermissionManager.hasStoragePermissions(this)
+
+        if (hasPermissions) {
+            Log.i(TAG, "✅ Storage permissions granted")
+        } else {
+            Log.w(TAG, "⚠️ Storage permissions not granted")
+
+            val requiredPermissions = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                    "READ_MEDIA_IMAGES"
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                    "READ_EXTERNAL_STORAGE"
+                }
+                else -> {
+                    "WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE"
+                }
+            }
+            Log.w(TAG, "Required permissions: $requiredPermissions")
         }
     }
 

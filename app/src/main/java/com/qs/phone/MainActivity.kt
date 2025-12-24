@@ -55,8 +55,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var disconnectButton: Button
     private lateinit var listDevicesButton: Button
     private lateinit var diagnosticButton: Button
-    private lateinit var requestPermissionButton: Button
-    private lateinit var permissionStatusText: TextView
     private lateinit var checkWirelessButton: Button
     private lateinit var wirelessStatusText: TextView
     private lateinit var screenshotTestButton: Button
@@ -89,7 +87,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-
         // 在后台线程加载原生库
         mainScope.launch(Dispatchers.IO) {
 //            NativeLibraryLoader.loadLibraries(this@MainActivity)
@@ -98,7 +95,9 @@ class MainActivity : AppCompatActivity() {
         initViews()
         loadConfig()
         setupListeners()
-        updatePermissionStatus()
+
+        // 自动申请权限
+        autoRequestPermissions()
 
         // 延迟检查 LADB 状态，等待库加载完成
 //        mainScope.launch {
@@ -108,6 +107,24 @@ class MainActivity : AppCompatActivity() {
 //        }
 //        // 系统检测时安装 ADBKeyboard
 //        performSystemCheck()
+    }
+
+    /**
+     * 自动申请权限（静默申请，不显示 UI）
+     */
+    private fun autoRequestPermissions() {
+        if (ZhiAIApplication.shouldRequestPermissions(this)) {
+            Log.d("MainActivity", "自动申请存储权限")
+            PermissionManager.requestStoragePermissions(this) { granted ->
+                if (granted) {
+                    Log.i("MainActivity", "✅ 权限已自动授予")
+                } else {
+                    Log.w("MainActivity", "⚠️ 权限被拒绝，部分功能可能受限")
+                }
+            }
+        } else {
+            Log.i("MainActivity", "✅ 权限已存在，跳过申请")
+        }
     }
 
     override fun onResume() {
@@ -141,8 +158,6 @@ class MainActivity : AppCompatActivity() {
         disconnectButton = findViewById(R.id.disconnectButton)
         listDevicesButton = findViewById(R.id.listDevicesButton)
         diagnosticButton = findViewById(R.id.diagnosticButton)
-        requestPermissionButton = findViewById(R.id.requestPermissionButton)
-        permissionStatusText = findViewById(R.id.permissionStatusText)
         checkWirelessButton = findViewById(R.id.checkWirelessButton)
         wirelessStatusText = findViewById(R.id.wirelessStatusText)
         screenshotTestButton = findViewById(R.id.screenshotTestButton)
@@ -176,18 +191,6 @@ class MainActivity : AppCompatActivity() {
 
         ladbHelpButton.setOnClickListener {
             ErrorDialog.showLadbNotAvailable(this)
-        }
-
-        requestPermissionButton.setOnClickListener {
-            PermissionManager.requestStoragePermissions(this) { granted ->
-                if (granted) {
-                    Toast.makeText(this, "权限已授予", Toast.LENGTH_SHORT).show()
-                    updatePermissionStatus()
-                } else {
-                    Toast.makeText(this, "权限被拒绝", Toast.LENGTH_SHORT).show()
-                    updatePermissionStatus()
-                }
-            }
         }
 
         dnsConnectButton.setOnClickListener {
@@ -432,53 +435,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 更新权限状态显示
-     */
-    private fun updatePermissionStatus() {
-        val hasPermissions = PermissionManager.hasStoragePermissions(this)
-
-        val status = buildString {
-            if (hasPermissions) {
-                append("✅ 文件读写权限已授予\n\n")
-            } else {
-                append("❌ 文件读写权限未授予\n\n")
-            }
-
-            when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
-                    append("需要权限：READ_MEDIA_IMAGES\n")
-                }
-
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                    append("需要权限：READ_EXTERNAL_STORAGE\n")
-                }
-
-                else -> {
-                    append("需要权限：WRITE_EXTERNAL_STORAGE\n")
-                    append("需要权限：READ_EXTERNAL_STORAGE\n")
-                }
-            }
-
-            if (!hasPermissions) {
-                append("\n点击下方按钮申请权限")
-            } else {
-                append("\n✅ 可以保存截图和日志文件")
-            }
-        }
-
-        permissionStatusText.text = status
-
-        // 更新按钮状态
-        if (hasPermissions) {
-            requestPermissionButton.text = "权限已授予"
-            requestPermissionButton.isEnabled = false
-        } else {
-            requestPermissionButton.text = "请求文件读写权限"
-            requestPermissionButton.isEnabled = true
-        }
-    }
-
     private fun saveConfig() {
         val baseUrl = baseUrlInput.text.toString().trim()
         val apiKey = apiKeyInput.text.toString().trim()
@@ -702,7 +658,8 @@ class MainActivity : AppCompatActivity() {
 
         val granted =
             PermissionManager.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        updatePermissionStatus()
+
+        Log.d("MainActivity", if (granted) "✅ 权限已授予" else "⚠️ 权限被拒绝")
     }
 
     /**
