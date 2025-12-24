@@ -25,6 +25,7 @@ import com.qs.phone.ui.DiagnosticTool
 import com.qs.phone.ui.ErrorDialog
 import com.qs.phone.util.NativeLibraryLoader
 import com.qs.phone.util.PermissionManager
+import com.qs.phone.util.DeveloperOptionsHelper
 import com.qs.phone.controller.AppDetectionTest
 import com.qs.phone.controller.DeviceController
 import kotlinx.coroutines.CoroutineScope
@@ -1107,46 +1108,27 @@ class MainActivity : AppCompatActivity() {
      * 连接设备
      */
     private fun connectDevice() {
-        // 第一步：检查开发者选项是否开启
-        val developerOptionsEnabled = shellExecutor.checkUSBDebuggingEnabled()
-        val wirelessDebuggingEnabled = shellExecutor.checkWirelessDebuggingEnabled()
+        // 使用工具类检查开发者选项
+        DeveloperOptionsHelper.checkAndGuideDeveloperOptions(
+            this,
+            onDeveloperOptionsEnabled = {
+                // 开发者选项已启用，继续连接流程
+                continueConnectionProcess()
+            },
+            onCancelled = {
+                // 用户取消了操作，可以在这里添加额外的处理
+                Toast.makeText(this, "需要开启开发者选项才能继续", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
 
-        if (!developerOptionsEnabled && !wirelessDebuggingEnabled) {
-            // 开发者选项未开启
-            AlertDialog.Builder(this)
-                .setTitle("需要开启开发者选项")
-                .setMessage("为了使用 ADB 调试功能，需要先开启开发者选项。\n\n请在接下来的设置页面中：\n1. 连续点击「版本号」7次开启开发者选项\n2. 返回上一层开启「USB调试」或「无线调试」")
-                .setPositiveButton("去开启") { _, _ ->
-                    // 跳转到开发者选项设置
-                    try {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            // 兼容部分设备的包名映射
-                            setPackage("com.android.settings")
-                        }
-                        // 检查设备是否支持该 Intent（避免崩溃）
-                        if (intent.resolveActivity(packageManager) != null) {
-                            startActivity(intent)
-                        } else {
-                            // 备选方案：打开设置主页面
-                            val fallbackIntent = Intent(Settings.ACTION_SETTINGS).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(fallbackIntent)
-                        }
-                        Toast.makeText(
-                            this,
-                            "请在设置中开启「开发者选项」和「USB调试」",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(this, "无法打开设置页面", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                .setNegativeButton("取消", null)
-                .show()
-            return
-        }
+    /**
+     * 继续连接流程（在开发者选项已启用后）
+     */
+    private fun continueConnectionProcess() {
+        // 获取开发者选项状态
+        val debuggingStatus = DeveloperOptionsHelper.checkDeveloperOptionsStatus(this)
+        val wirelessDebuggingEnabled = debuggingStatus.second
 
         // 开发者选项已开启，开始第二步
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1159,7 +1141,9 @@ class MainActivity : AppCompatActivity() {
                         // 重新检查并执行
                         connectDevice()
                     }
-                    .setNegativeButton("取消", null)
+                    .setNegativeButton("开发者选项") { _, _ ->
+                        DeveloperOptionsHelper.openDeveloperOptionsSettings(this@MainActivity)
+                    }
                     .show()
             } else {
                 // 已开启无线调试，执行DNS连接
