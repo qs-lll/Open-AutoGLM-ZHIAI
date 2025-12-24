@@ -145,6 +145,11 @@ class DeviceController(
         val initResult = shell.initialize()
         Log.d(TAG, "Shell initialization result: $initResult")
         Log.d(TAG, "Shell running status after init: ${shell.running}")
+
+        // 输出当前选中的设备ID
+        val selectedDevice = shell.getSelectedDeviceId()
+        Log.d(TAG, "Selected device ID: $selectedDevice")
+
         if (!initResult) {
             Log.w(TAG, "Shell initialization failed")
         } else {

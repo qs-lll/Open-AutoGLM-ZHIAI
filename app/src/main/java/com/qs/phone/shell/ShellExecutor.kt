@@ -54,6 +54,9 @@ class ShellExecutor(private val context: Context) {
     private var tryingToPair = AtomicBoolean(false)
     private var shellProcess: Process? = null
 
+    // 当前选中的设备ID（当有多台设备连接时）
+    private var selectedDeviceId: String? = null
+
     /**
      * 初始化 ADB 连接
      */
@@ -87,6 +90,12 @@ class ShellExecutor(private val context: Context) {
 
             // 测试 ADB 连接
             if (!testAdbConnection()) {
+                tryingToPair.set(false)
+                return@withContext false
+            }
+
+            // 选择第一个可用设备（当有多台设备连接时）
+            if (!selectFirstDevice()) {
                 tryingToPair.set(false)
                 return@withContext false
             }
@@ -128,6 +137,13 @@ class ShellExecutor(private val context: Context) {
     suspend fun executeCommand(command: List<String>): ShellResult = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Executing: $command")
+            Log.d(TAG, "Selected device: $selectedDeviceId")
+
+            // 如果selectedDeviceId为空但存在多个设备，尝试重新选择
+            if (selectedDeviceId == null) {
+                Log.w(TAG, "No device selected, attempting to select first device...")
+                selectFirstDevice()
+            }
 
             val process = createAdbProcess(command)
             val completed = process.waitFor(30, TimeUnit.SECONDS)
@@ -141,8 +157,20 @@ class ShellExecutor(private val context: Context) {
 //            Log.e(TAG, "stderr: $stderr")
             Log.d(TAG, "stderr: $stdout"+"${stdout.contains("Connection refused")}")
 
+            // 检查是否有多设备错误
+            val hasMultipleDevicesError = stdout.contains("more than one device/emulator") ||
+                                         stderr.contains("more than one device/emulator") ||
+                                         stdout.contains("multiple devices") ||
+                                         stderr.contains("multiple devices")
+
+            if (hasMultipleDevicesError) {
+                Log.e(TAG, "Multiple devices detected in output, attempting to reselect device...")
+                // 重新选择设备
+                reselectDevice()
+            }
+
             ShellResult(
-                success = exitCode == 0 && !stdout.contains("Connection refused") &&!stdout.contains("failed to connect"),
+                success = exitCode == 0 && !stdout.contains("Connection refused") &&!stdout.contains("failed to connect") && !hasMultipleDevicesError,
                 stdout = stdout,
                 stderr = stderr,
                 exitCode = exitCode
@@ -288,6 +316,58 @@ class ShellExecutor(private val context: Context) {
         }
     }
 
+    /**
+     * 选择第一个可用设备
+     * 当检测到多个设备连接时，只选择第一个设备用于后续操作
+     */
+    suspend fun selectFirstDevice(): Boolean = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Selecting first device...")
+        val devices = getDevicesSuspending()
+        Log.d(TAG, "Found devices: $devices")
+
+        when {
+            devices.isEmpty() -> {
+                Log.w(TAG, "No devices found")
+                false
+            }
+            devices.size == 1 -> {
+                selectedDeviceId = devices[0]
+                Log.d(TAG, "Selected device: ${devices[0]}")
+                true
+            }
+            else -> {
+                selectedDeviceId = devices[0]
+                Log.w(TAG, "Multiple devices detected (${devices.size}), using first device: ${devices[0]}")
+                Log.d(TAG, "All devices: $devices")
+                true
+            }
+        }
+    }
+
+    /**
+     * 获取当前选中的设备ID
+     */
+    fun getSelectedDeviceId(): String? = selectedDeviceId
+
+    /**
+     * 测试方法：执行一个简单的ADB命令来验证-s参数是否正确添加
+     */
+    suspend fun testDeviceCommand(): ShellResult = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Testing device command with selected device: $selectedDeviceId")
+        val result = executeShell("echo 'test'")
+        Log.d(TAG, "Test command result: success=${result.success}, stdout='${result.stdout}', stderr='${result.stderr}'")
+        result
+    }
+
+    /**
+     * 重新选择设备（在设备连接状态改变时调用）
+     */
+    suspend fun reselectDevice(): Boolean = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Reselecting device...")
+        selectedDeviceId = null
+        selectFirstDevice()
+    }
+
 
     /**
      * 清理资源
@@ -358,10 +438,25 @@ class ShellExecutor(private val context: Context) {
     }
 
     private fun createAdbProcess(command: List<String>): Process {
-        val commandList = command.toMutableList().also {
-            it.add(0, adbPath)
+        val commandList = mutableListOf<String>().apply {
+            add(adbPath)
+
+            // 如果已选择设备，添加 -s 参数指定设备
+            selectedDeviceId?.let { deviceId ->
+                // 跳过不需要设备参数的ADB命令
+                val firstCommand = command.firstOrNull()
+                if (firstCommand != null && !listOf("devices", "connect", "disconnect", "kill-server", "start-server", "tcpip").contains(firstCommand)) {
+                    add("-s")
+                    add(deviceId)
+                    Log.d(TAG, "Adding -s $deviceId to command for device selection")
+                }
+            }
+
+            // 添加原始命令
+            addAll(command)
         }
         Log.d(TAG, "Running ADB command: $commandList")
+        Log.i(TAG, "ADB command full path: ${commandList.joinToString(" ")}")
 
         return ProcessBuilder(commandList)
             .directory(context.filesDir)
