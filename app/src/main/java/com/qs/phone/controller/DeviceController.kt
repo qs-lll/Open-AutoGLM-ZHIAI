@@ -750,9 +750,18 @@ class DeviceController(
     }
 
     /**
-     * ??????
+     * 获取设备列表（同步版本，已废弃）
+     * @deprecated 使用 getDevicesSuspending() 代替
      */
+    @Deprecated("Use getDevicesSuspending() to avoid blocking", ReplaceWith("getDevicesSuspending()"))
     fun getDevices(): List<String> = shell.getDevices()
+
+    /**
+     * 获取设备列表（异步版本，带超时）
+     */
+    suspend fun getDevicesSuspending(timeoutSeconds: Long = 10): List<String> {
+        return shell.getDevicesSuspending(timeoutSeconds)
+    }
 
     /**
      * ????

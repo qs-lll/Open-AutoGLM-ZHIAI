@@ -89,18 +89,23 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // 加载原生库
-        NativeLibraryLoader.loadLibraries(this)
+
+        // 在后台线程加载原生库
+        mainScope.launch(Dispatchers.IO) {
+//            NativeLibraryLoader.loadLibraries(this@MainActivity)
+        }
 
         initViews()
         loadConfig()
         setupListeners()
         updatePermissionStatus()
-        checkLadbStatus()
 
-        // 初始化检测状态
-        initDetectionStatus()
-
+        // 延迟检查 LADB 状态，等待库加载完成
+//        mainScope.launch {
+//            delay(3300)  // 给库加载一些时间
+//            checkLadbStatus()
+//            initDetectionStatus()
+//        }
 //        // 系统检测时安装 ADBKeyboard
 //        performSystemCheck()
     }
@@ -111,6 +116,13 @@ class MainActivity : AppCompatActivity() {
 
         // 重新检查检测状态
         checkAllDetectionStatus()
+
+        // 移除自动设备检查，避免触发 ADB 自动重连
+        // 如果需要检查设备，用户应该手动点击"列出设备"按钮
+        // mainScope.launch {
+        //     val devices = shellExecutor.getDevicesSuspending()
+        //     Log.e("resume=devices",devices.toString())
+        // }
     }
 
     private fun initViews() {
@@ -230,7 +242,7 @@ class MainActivity : AppCompatActivity() {
             mainScope.launch {
                 try {
                     val shell = shellExecutor
-                    val devices = shell.getDevices()
+                    val devices = shell.getDevicesSuspending()
 
                     if (devices.isEmpty()) {
                         AlertDialog.Builder(this@MainActivity)
@@ -490,7 +502,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncConfigToService() {
         FloatingWindowService.baseUrl =
-            prefs.getString("base_url", "https://open.bigmodel.cn/api/paas/v4") ?: "https://open.bigmodel.cn/api/paas/v4"
+            prefs.getString("base_url", "https://open.bigmodel.cn/api/paas/v4")
+                ?: "https://open.bigmodel.cn/api/paas/v4"
         FloatingWindowService.apiKey = prefs.getString("api_key", "EMPTY") ?: "EMPTY"
         FloatingWindowService.modelName =
             prefs.getString("model_name", "autoglm-phone") ?: "autoglm-phone"
@@ -752,7 +765,7 @@ class MainActivity : AppCompatActivity() {
                 val success = performLadbDnsConnection(shell, statusText)
 
                 if (success) {
-                    val devices = shell.getDevices()
+                    val devices = shell.getDevicesSuspending()
                     statusText.text = "✅ DNS连接成功！\n\n发现设备:\n${devices.joinToString("\n")}"
                 } else {
                     statusText.text =
@@ -806,7 +819,8 @@ class MainActivity : AppCompatActivity() {
                 delay(1000)
                 elapsedSeconds++
                 runOnUiThread {
-                    statusText.text = "🔍 搜索无线调试服务 (${elapsedSeconds}s)...\n\n⏳ 正在发现ADB端口"
+                    statusText.text =
+                        "🔍 搜索无线调试服务 (${elapsedSeconds}s)...\n\n⏳ 正在发现ADB端口"
                 }
             }
 
@@ -824,7 +838,7 @@ class MainActivity : AppCompatActivity() {
                 var connected = false
                 for (port in discoveredPorts) {
                     runOnUiThread { statusText.text = "🔄 正在连接到 localhost:$port..." }
-                    Log.e("在连接到 local  ","ports"+port+"")
+                    Log.e("在连接到 local  ", "ports" + port + "")
                     connected = connected or shell.connectToDevice("localhost", port)
                 }
                 if (connected) {
@@ -838,7 +852,7 @@ class MainActivity : AppCompatActivity() {
 //                Thread.sleep(2000)
 
                 runOnUiThread { statusText.text = "🔄 等待设备连接..." }
-                val devices = shell.getDevices()
+                val devices = shell.getDevicesSuspending()
                 return@withContext devices.isNotEmpty()
             }
 
@@ -930,7 +944,7 @@ class MainActivity : AppCompatActivity() {
                 var retryCount = 0
                 val maxRetries = 5
                 while (retryCount < maxRetries) {
-                    val devices = shellExecutor.getDevices()
+                    val devices = shellExecutor.getDevicesSuspending()
                     if (devices.isNotEmpty()) {
                         Log.d("MainActivity", "检测到设备: $devices")
                         break
@@ -953,19 +967,31 @@ class MainActivity : AppCompatActivity() {
                 if (installSuccess) {
                     Log.d("MainActivity", "✅ ADBKeyboard 安装和初始化成功")
                     runOnUiThread {
-                        Toast.makeText(this@MainActivity, "✅ ADBKeyboard 安装成功", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "✅ ADBKeyboard 安装成功",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 } else {
                     Log.w("MainActivity", "⚠️ ADBKeyboard 安装失败，将使用备用输入方案")
                     runOnUiThread {
-                        Toast.makeText(this@MainActivity, "⚠️ ADBKeyboard 安装失败，将使用备用输入方案", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "⚠️ ADBKeyboard 安装失败，将使用备用输入方案",
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
                 }
 
             } catch (e: Exception) {
                 Log.e("MainActivity", "系统检测和 ADBKeyboard 安装失败", e)
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "系统检测失败: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "系统检测失败: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
@@ -997,12 +1023,22 @@ class MainActivity : AppCompatActivity() {
             if (isLadbAvailable) {
                 ladbStatusImageView.visibility = View.VISIBLE
                 ladbStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                ladbStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_green_dark))
+                ladbStatusImageView.setColorFilter(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        android.R.color.holo_green_dark
+                    )
+                )
                 setupLadbButton.visibility = View.GONE
             } else {
                 ladbStatusImageView.visibility = View.VISIBLE
                 ladbStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                ladbStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                ladbStatusImageView.setColorFilter(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        android.R.color.holo_red_dark
+                    )
+                )
                 setupLadbButton.visibility = View.VISIBLE
             }
         }
@@ -1014,18 +1050,28 @@ class MainActivity : AppCompatActivity() {
     private fun checkDeviceConnectionStatus() {
         mainScope.launch {
             try {
-                val isConnected = shellExecutor.getDevices().isNotEmpty()
+                val isConnected = shellExecutor.getDevicesSuspending().isNotEmpty()
 
                 runOnUiThread {
                     if (isConnected) {
                         deviceStatusImageView.visibility = View.VISIBLE
                         deviceStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                        deviceStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_green_dark))
+                        deviceStatusImageView.setColorFilter(
+                            ContextCompat.getColor(
+                                this@MainActivity,
+                                android.R.color.holo_green_dark
+                            )
+                        )
                         connectDeviceButton.visibility = View.GONE
                     } else {
                         deviceStatusImageView.visibility = View.VISIBLE
                         deviceStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                        deviceStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                        deviceStatusImageView.setColorFilter(
+                            ContextCompat.getColor(
+                                this@MainActivity,
+                                android.R.color.holo_red_dark
+                            )
+                        )
                         connectDeviceButton.visibility = View.VISIBLE
                     }
                 }
@@ -1033,7 +1079,12 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     deviceStatusImageView.visibility = View.VISIBLE
                     deviceStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                    deviceStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                    deviceStatusImageView.setColorFilter(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            android.R.color.holo_red_dark
+                        )
+                    )
                     connectDeviceButton.visibility = View.VISIBLE
                 }
             }
@@ -1052,12 +1103,22 @@ class MainActivity : AppCompatActivity() {
                 if (isImeInstalled) {
                     imeStatusImageView.visibility = View.VISIBLE
                     imeStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                    imeStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_green_dark))
+                    imeStatusImageView.setColorFilter(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            android.R.color.holo_green_dark
+                        )
+                    )
                     installImeButton.visibility = View.GONE
                 } else {
                     imeStatusImageView.visibility = View.VISIBLE
                     imeStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                    imeStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                    imeStatusImageView.setColorFilter(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            android.R.color.holo_red_dark
+                        )
+                    )
                     installImeButton.visibility = View.VISIBLE
                 }
             }
@@ -1065,7 +1126,12 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 imeStatusImageView.visibility = View.VISIBLE
                 imeStatusImageView.setImageResource(android.R.drawable.ic_menu_info_details)
-                imeStatusImageView.setColorFilter(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_dark))
+                imeStatusImageView.setColorFilter(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        android.R.color.holo_red_dark
+                    )
+                )
                 installImeButton.visibility = View.VISIBLE
             }
         }
@@ -1096,7 +1162,11 @@ class MainActivity : AppCompatActivity() {
                     try {
                         val intent = Intent(Settings.ACTION_APPLICATION_SETTINGS)
                         startActivity(intent)
-                        Toast.makeText(this, "请在设置中开启「开发者选项」和「USB调试」", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this,
+                            "请在设置中开启「开发者选项」和「USB调试」",
+                            Toast.LENGTH_LONG
+                        ).show()
                     } catch (e: Exception) {
                         Toast.makeText(this, "无法打开设置页面", Toast.LENGTH_SHORT).show()
                     }
@@ -1136,16 +1206,21 @@ class MainActivity : AppCompatActivity() {
     private fun connectWithUSB() {
         mainScope.launch {
             try {
-                Toast.makeText(this@MainActivity, "正在启用USB调试模式...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "正在启用USB调试模式...", Toast.LENGTH_SHORT)
+                    .show()
 
                 // 先检查当前设备列表状态
-                val currentDevices = shellExecutor.getDevices()
+                val currentDevices = shellExecutor.getDevicesSuspending()
                 Log.d("MainActivity", "当前设备列表: $currentDevices")
 
                 // 执行 adb tcpip 5555
                 val tcpipResult = shellExecutor.executeADB("tcpip 5555")
                 if (tcpipResult.success) {
-                    Toast.makeText(this@MainActivity, "TCP/IP模式已启用，等待设备... (10秒)", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "TCP/IP模式已启用，等待设备... (10秒)",
+                        Toast.LENGTH_SHORT
+                    ).show()
 
                     // 等待端口启动，增加时间
                     kotlinx.coroutines.delay(3000)
@@ -1157,7 +1232,7 @@ class MainActivity : AppCompatActivity() {
 
                     while (attempts > 0 && !connected) {
                         // 重新获取设备列表
-                        val devicesBeforeConnect = shellExecutor.getDevices()
+                        val devicesBeforeConnect = shellExecutor.getDevicesSuspending()
                         Log.d("MainActivity", "尝试连接前的设备列表: $devicesBeforeConnect")
 
                         // 尝试连接到本地 5555 端口
@@ -1165,14 +1240,15 @@ class MainActivity : AppCompatActivity() {
 
                         if (!connected) {
                             // 检查连接错误原因
-                            val devicesAfterConnect = shellExecutor.getDevices()
+                            val devicesAfterConnect = shellExecutor.getDevicesSuspending()
                             Log.d("MainActivity", "连接失败后设备列表: $devicesAfterConnect")
 
                             // 如果是授权问题，提示用户
                             if (devicesAfterConnect.isEmpty()) {
                                 lastError = "连接被拒绝或未授权"
                             } else {
-                                val unauthorizedDevices = devicesAfterConnect.filter { it.contains("unauthorized") }
+                                val unauthorizedDevices =
+                                    devicesAfterConnect.filter { it.contains("unauthorized") }
                                 if (unauthorizedDevices.isNotEmpty()) {
                                     lastError = "设备需要授权，请确认手机上的授权弹窗"
                                 } else {
@@ -1182,13 +1258,17 @@ class MainActivity : AppCompatActivity() {
 
                             attempts--
                             if (attempts > 0) {
-                                Toast.makeText(this@MainActivity, "连接失败，正在重试... (剩余${attempts}次)\n错误: $lastError", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "连接失败，正在重试... (剩余${attempts}次)\n错误: $lastError",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                                 kotlinx.coroutines.delay(2000)
                             }
                         } else {
                             // 等待一下确保连接完成
                             kotlinx.coroutines.delay(1000)
-                            val finalDevices = shellExecutor.getDevices()
+                            val finalDevices = shellExecutor.getDevicesSuspending()
                             Log.d("MainActivity", "连接后的设备列表: $finalDevices")
 
                             // 检查是否有 unauthorized 标记
@@ -1197,7 +1277,11 @@ class MainActivity : AppCompatActivity() {
                                 lastError = "设备未授权，请确认手机上的授权弹窗"
                                 attempts--
                                 if (attempts > 0) {
-                                    Toast.makeText(this@MainActivity, "⚠️ 未授权，请确认手机上的授权弹窗", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "⚠️ 未授权，请确认手机上的授权弹窗",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                     kotlinx.coroutines.delay(3000)
                                 }
                             } else {
@@ -1207,10 +1291,11 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     // 根据连接结果显示提示
-                    val finalDevices = shellExecutor.getDevices()
+                    val finalDevices = shellExecutor.getDevicesSuspending()
                     if (finalDevices.isNotEmpty() && !finalDevices.any { it.contains("unauthorized") }) {
                         runOnUiThread {
-                            Toast.makeText(this@MainActivity, "✅ 设备连接成功", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "✅ 设备连接成功", Toast.LENGTH_SHORT)
+                                .show()
                             checkDeviceConnectionStatus()
                         }
                     } else if (finalDevices.any { it.contains("unauthorized") }) {
@@ -1230,12 +1315,17 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     runOnUiThread {
-                        Toast.makeText(this@MainActivity, "TCP/IP 启动失败：${tcpipResult.stderr}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "TCP/IP 启动失败：${tcpipResult.stderr}",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "连接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "连接失败: ${e.message}", Toast.LENGTH_SHORT)
+                        .show()
                 }
             }
         }
@@ -1253,10 +1343,14 @@ class MainActivity : AppCompatActivity() {
             }
             .setNeutralButton("检查设备列表") { _, _ ->
                 mainScope.launch {
-                    val devices = shellExecutor.getDevices()
+                    val devices = shellExecutor.getDevicesSuspending()
                     AlertDialog.Builder(this@MainActivity)
                         .setTitle("当前设备列表")
-                        .setMessage(if (devices.isEmpty()) "未检测到设备" else devices.joinToString("\n"))
+                        .setMessage(
+                            if (devices.isEmpty()) "未检测到设备" else devices.joinToString(
+                                "\n"
+                            )
+                        )
                         .setPositiveButton("确定", null)
                         .show()
                 }
@@ -1281,17 +1375,30 @@ class MainActivity : AppCompatActivity() {
                     // 尝试重新启动服务器
                     val startResult = shellExecutor.executeADB("start-server")
                     if (startResult.success) {
-                        Toast.makeText(this@MainActivity, "已清除授权，请重新连接设备", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "已清除授权，请重新连接设备",
+                            Toast.LENGTH_SHORT
+                        ).show()
                         // 重新连接
                         connectDevice()
                     } else {
-                        Toast.makeText(this@MainActivity, "重新启动服务器失败：${startResult.stderr}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "重新启动服务器失败：${startResult.stderr}",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 } else {
-                    Toast.makeText(this@MainActivity, "清除授权失败：${killResult.stderr}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "清除授权失败：${killResult.stderr}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "清除授权时出错：${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "清除授权时出错：${e.message}", Toast.LENGTH_SHORT)
+                    .show()
             }
         }
     }
@@ -1324,15 +1431,21 @@ class MainActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     if (installSuccess) {
-                        Toast.makeText(this@MainActivity, "输入法安装成功", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "输入法安装成功", Toast.LENGTH_SHORT)
+                            .show()
                         checkInputMethodStatus() // 重新检查状态
                     } else {
-                        Toast.makeText(this@MainActivity, "输入法安装失败", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "输入法安装失败", Toast.LENGTH_SHORT)
+                            .show()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "输入法安装失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "输入法安装失败: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }
@@ -1357,12 +1470,17 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         // 如果无法直接跳转到权限页面，则跳转到应用详情页面
                         try {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = android.net.Uri.parse("package:$packageName")
-                            }
+                            val intent =
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = android.net.Uri.parse("package:$packageName")
+                                }
                             startActivityForResult(intent, REQUEST_INSTALL_PERMISSION)
                         } catch (e2: Exception) {
-                            Toast.makeText(this, "无法打开设置页面，请手动前往设置开启权限", Toast.LENGTH_LONG).show()
+                            Toast.makeText(
+                                this,
+                                "无法打开设置页面，请手动前往设置开启权限",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
                     }
                 }

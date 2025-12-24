@@ -177,16 +177,52 @@ class ShellExecutor(private val context: Context) {
             val result = executeCommand(listOf("connect", address))
 
             if (result.success) {
-                Log.d(TAG, "Connecte1d to $address")
+                Log.d(TAG, "Connected to $address")
                 true
             } else {
-                Log.w(TAG, "Faile1d to connect: ${result.stderr}")
+                Log.w(TAG, "Failed to connect: ${result.stderr}")
                 false
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error connecting to device", e)
             false
         }
+    }
+
+    /**
+     * 无线调试配对
+     * adb pair <ip>:<port> <pairing_code>
+     */
+    suspend fun pairDevice(ip: String, port: Int, pairingCode: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val address = "$ip:$port"
+            Log.d(TAG, "Pairing with device at $address...")
+            Log.d(TAG, "Pairing code: ****")
+
+            // 执行 adb pair 命令
+            val result = executeCommand(listOf("pair", address, pairingCode))
+
+            if (result.success) {
+                Log.d(TAG, "Successfully paired with $address")
+                Log.d(TAG, "Pairing output: ${result.stdout}")
+                true
+            } else {
+                Log.w(TAG, "Failed to pair: ${result.stderr}")
+                Log.d(TAG, "Pairing output: ${result.stdout}")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error pairing device", e)
+            false
+        }
+    }
+
+    /**
+     * 无线调试配对（重载，使用 localhost）
+     * adb pair localhost:<port> <pairing_code>
+     */
+    suspend fun pairDevice(port: Int, pairingCode: String): Boolean {
+        return pairDevice("localhost", port, pairingCode)
     }
 
     /**
@@ -204,12 +240,14 @@ class ShellExecutor(private val context: Context) {
     }
 
     /**
-     * 获取设备列表
+     * 获取设备列表（同步版本，已废弃，使用 getDevicesSuspending）
+     * @deprecated 使用 getDevicesSuspending() 代替，避免阻塞
      */
+    @Deprecated("Use getDevicesSuspending() to avoid blocking", ReplaceWith("getDevicesSuspending()"))
     fun getDevices(): List<String> {
         return try {
             val devicesProcess = createAdbProcess(listOf("devices"))
-            devicesProcess.waitFor()
+            devicesProcess.waitFor(10, TimeUnit.SECONDS)  // 添加 10 秒超时
 
             val linesRaw = BufferedReader(devicesProcess.inputStream.reader()).readLines()
 
@@ -224,59 +262,32 @@ class ShellExecutor(private val context: Context) {
     }
 
     /**
-     * 检查是否已连接到本地设备
+     * 获取设备列表（异步版本，带超时）
+     * 使用协程避免阻塞线程池
      */
-    fun isConnectedToLocalDevice(): Boolean {
-        val devices = getDevices()
-        return devices.any { it.contains("localhost") || it.contains("127.0.0.1") }
-    }
+    suspend fun getDevicesSuspending(timeoutSeconds: Long = 10): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val devicesProcess = createAdbProcess(listOf("devices"))
+            val completed = devicesProcess.waitFor(timeoutSeconds, TimeUnit.SECONDS)
 
-    /**
-     * 启动 DNS 扫描
-     */
-    fun startDnsScan() {
-        dnsDiscoveryManager.scanAdbPorts()
-    }
-
-    /**
-     * 停止 DNS 扫描
-     */
-    fun stopDnsScan() {
-        dnsDiscoveryManager.stopScan()
-    }
-
-    /**
-     * 获取发现的端口
-     */
-    fun getDiscoveredPorts(): List<Int> {
-        return dnsDiscoveryManager.getDiscoveredPorts()
-    }
-
-    /**
-     * 自动重连机制
-     */
-    fun waitForDeathAndReset() {
-        Thread {
-            try {
-                while (true) {
-                    if (!tryingToPair.get()) {
-                        shellProcess?.waitFor()
-                        _running.postValue(false)
-                        debug("Shell is dead, resetting...")
-                        createAdbProcess(listOf("kill-server")).waitFor()
-
-                        Thread.sleep(3_000)
-                        GlobalScope.launch {
-                            initServer()
-                        }
-                    }
-                    Thread.sleep(1_000)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in reset loop", e)
+            if (!completed) {
+                Log.w(TAG, "getDevices timeout after ${timeoutSeconds}s, killing process")
+                devicesProcess.destroyForcibly()
+                return@withContext emptyList()
             }
-        }.start()
+
+            val linesRaw = BufferedReader(devicesProcess.inputStream.reader()).readLines()
+
+            linesRaw
+                .filterNot { it.contains("List of devices attached") }
+                .map { it.split("\t").first() }
+                .filterNot { it.isEmpty() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get devices", e)
+            emptyList()
+        }
     }
+
 
     /**
      * 清理资源
@@ -304,12 +315,6 @@ class ShellExecutor(private val context: Context) {
         }
     }
 
-    /**
-     * 检查是否可用
-     */
-    fun isAvailable(): Boolean {
-        return _running.value == true
-    }
 
     /**
      * 检查 ADB 库是否可用

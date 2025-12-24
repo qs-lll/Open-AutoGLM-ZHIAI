@@ -119,7 +119,7 @@ class WirelessAdbPairingService : Service() {
         pairingDiscoveryManager = PairingDiscoveryManager(this, nsdManager)
 
         // 启动服务发现
-        val success = pairingDiscoveryManager?.startPairingDiscovery(object :
+        pairingDiscoveryManager?.startPairingDiscovery(object :
             PairingDiscoveryManager.PairingCallback {
             override fun onServiceFound(serviceInfo: android.net.nsd.NsdServiceInfo, port: Int) {
                 Log.d(TAG, "Pairing service found: port=$port")
@@ -137,12 +137,8 @@ class WirelessAdbPairingService : Service() {
                 Log.e(TAG, "Discovery failed: $errorCode")
                 onDiscoveryFailed()
             }
-        }) ?: false
+        })
 
-        if (!success) {
-            isPairing = false
-            showFailedNotification("启动服务发现失败")
-        }
     }
 
     /**
@@ -155,6 +151,10 @@ class WirelessAdbPairingService : Service() {
         pairingDiscoveryManager?.stopPairingDiscovery()
         pairingJob?.cancel()
         pairingJob = null
+
+        // 清空已发现的服务列表
+        discoveredServices.clear()
+        discoveredPort = null
 
         Log.d(TAG, "Pairing stopped")
     }
@@ -237,7 +237,7 @@ class WirelessAdbPairingService : Service() {
 
         // 构建通知
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.logo)
             .setContentTitle("已找到无线调试服务")
             .setContentText("在通知中输入无线调试配对码")
             .addAction(replyAction)
@@ -272,15 +272,14 @@ class WirelessAdbPairingService : Service() {
 
         Log.d(TAG, "User entered pairing code: ****, port: $port")
 
-//        // 执行配对
-//        onInput(code, port)
+        // 执行配对
+        onInput(code, port)
     }
 
 
     /**
      * 执行配对
      * 对应 WirelessAdbPairingService.onInput()
-     * 简化版：直接使用 ADB 连接命令
      */
     private fun onInput(code: String, port: Int) {
         // 显示配对进度通知
@@ -288,26 +287,29 @@ class WirelessAdbPairingService : Service() {
 
         pairingJob = serviceScope.launch {
             try {
-                // TODO: 实现完整的 TLS + SPAKE2 配对协议
-                // 当前简化版：使用 ADB connect 命令
+                Log.d(TAG, "Executing ADB pair: port=$port, code=****")
 
-                // 先尝试断开现有连接
-                try {
-//                    shellExecutor.executeCommand("adb disconnect localhost:$port")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Disconnect failed (expected)", e)
+                // 使用 ShellExecutor 的 pairDevice 方法
+                val success = shellExecutor.pairDevice(port, code)
+                if (success) {
+                    onPairingSuccess(port, code)
+                } else {
+                    onPairingFailed("连接失败")
                 }
 
-                // 连接到设备
-//                val result = shellExecutor.executeCommand("adb connect localhost:$port")
-//                Log.d(TAG, "Connect result: $result")
+//                if (success) {
+//                    // 配对成功，尝试连接
+//                    Log.d(TAG, "Pairing successful, attempting to connect...")
+//                    val connected = shellExecutor.connectToDevice("localhost", port)
 //
-//                if (result.contains("connected")) {
-//                    // 配对成功
-//                    onPairingSuccess(port, code)
+//                    if (connected) {
+//                        onPairingSuccess(port, code)
+//                    } else {
+//                        onPairingFailed("配对成功但连接失败")
+//                    }
 //                } else {
-                    // 配对失败
-                    onPairingFailed("连接失败")
+//                    // 配对失败
+//                    onPairingFailed("配对失败，请检查配对码是否正确")
 //                }
             } catch (e: Exception) {
                 Log.e(TAG, "Pairing error", e)

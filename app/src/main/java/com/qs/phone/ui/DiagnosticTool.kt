@@ -218,8 +218,10 @@ object DiagnosticTool {
                 )
             }
 
-            // 如果库可用，尝试获取设备列表（这可能会较慢）
-            val devices = shell.getDevices()
+            // 如果库可用，尝试获取设备列表（使用带超时的异步版本）
+            val devices = kotlinx.coroutines.runBlocking {
+                shell.getDevicesSuspending(timeoutSeconds = 5)
+            }
 
             if (devices.isEmpty()) {
                 DiagnosticResult(

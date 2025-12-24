@@ -769,7 +769,7 @@ class FloatingWindowService : AccessibilityService() {
                     }
 
                     // 检查设备连接
-                    val devices = agent?.deviceController?.getDevices()
+                    val devices = agent?.deviceController?.getDevicesSuspending()
                     if (!devices.isNullOrEmpty()) {
                         appendLog("📱 检测到设备: $devices")
                     } else {
