@@ -1117,8 +1117,21 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("去开启") { _, _ ->
                     // 跳转到开发者选项设置
                     try {
-                        val intent = Intent(Settings.ACTION_APPLICATION_SETTINGS)
-                        startActivity(intent)
+                        val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            // 兼容部分设备的包名映射
+                            setPackage("com.android.settings")
+                        }
+                        // 检查设备是否支持该 Intent（避免崩溃）
+                        if (intent.resolveActivity(packageManager) != null) {
+                            startActivity(intent)
+                        } else {
+                            // 备选方案：打开设置主页面
+                            val fallbackIntent = Intent(Settings.ACTION_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(fallbackIntent)
+                        }
                         Toast.makeText(
                             this,
                             "请在设置中开启「开发者选项」和「USB调试」",
