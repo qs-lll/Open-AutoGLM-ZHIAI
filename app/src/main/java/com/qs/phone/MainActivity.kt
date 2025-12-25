@@ -97,6 +97,9 @@ class MainActivity : AppCompatActivity() {
     private var continuousSearchJob: kotlinx.coroutines.Job? = null
     private var isContinuousSearching = false
 
+    // 设备状态定时检测
+    private var deviceCheckJob: kotlinx.coroutines.Job? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -148,12 +151,21 @@ class MainActivity : AppCompatActivity() {
         // 重新检查检测状态
         checkAllDetectionStatus()
 
+        // 启动设备状态定时检测（每5秒执行一次）
+        startDeviceCheckTimer()
+
         // 移除自动设备检查，避免触发 ADB 自动重连
         // 如果需要检查设备，用户应该手动点击"列出设备"按钮
         // mainScope.launch {
         //     val devices = shellExecutor.getDevicesSuspending()
         //     Log.e("resume=devices",devices.toString())
         // }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 停止设备状态定时检测
+        stopDeviceCheckTimer()
     }
 
     private fun initViews() {
@@ -1184,9 +1196,9 @@ class MainActivity : AppCompatActivity() {
      * 检查所有检测项状态
      */
     private fun checkAllDetectionStatus() {
-        checkLadbDetectionStatus()
-        checkDeviceConnectionStatus()
-        checkInputMethodStatus()
+//        checkLadbDetectionStatus()
+//        checkDeviceConnectionStatus()
+//        checkInputMethodStatus()
 
         performDeviceCheck()
         performImeCheck()
@@ -1390,7 +1402,8 @@ class MainActivity : AppCompatActivity() {
                     .setCancelable(false)
                     .create()
                 progressDialog?.show()
-
+                // 尝试连接到本地 5555 端口
+                val connected = shellExecutor.connectToDevice("localhost", 5555)
                 // 先检查当前设备列表状态
                 val currentDevices = shellExecutor.getDevicesSuspending()
                 Log.d("MainActivity", "当前设备列表: $currentDevices")
@@ -1724,6 +1737,8 @@ class MainActivity : AppCompatActivity() {
         dnsSearchJob = null
         continuousSearchJob?.cancel()
         continuousSearchJob = null
+        deviceCheckJob?.cancel()
+        deviceCheckJob = null
 
         // 如果正在搜索，停止配对服务
         if (isContinuousSearching) {
@@ -1884,6 +1899,29 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 启动设备状态定时检测
+     */
+    private fun startDeviceCheckTimer() {
+        // 如果已经在运行，先停止旧的
+        stopDeviceCheckTimer()
+
+        deviceCheckJob = mainScope.launch {
+            while (true) {
+                delay(5000)  // 每5秒执行一次
+                performDeviceCheck()
+            }
+        }
+    }
+
+    /**
+     * 停止设备状态定时检测
+     */
+    private fun stopDeviceCheckTimer() {
+        deviceCheckJob?.cancel()
+        deviceCheckJob = null
     }
 
     /**
