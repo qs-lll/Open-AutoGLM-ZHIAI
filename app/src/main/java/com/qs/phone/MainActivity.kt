@@ -62,6 +62,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wirelessStatusText: TextView
     private lateinit var screenshotTestButton: Button
 
+    // 状态检测卡片视图
+    private lateinit var ladbIndicator: View
+    private lateinit var ladbStatus: TextView
+    private lateinit var checkLadbButton: Button
+    private lateinit var imeIndicator: View
+    private lateinit var imeStatus: TextView
+    private lateinit var checkImeButton: Button
+    private lateinit var deviceIndicator: View
+    private lateinit var deviceStatus: TextView
+    private lateinit var checkDeviceButton: Button
+
     // 检测项视图
     private lateinit var ladbStatusImageView: ImageView
     private lateinit var setupLadbButton: Button
@@ -165,6 +176,17 @@ class MainActivity : AppCompatActivity() {
         wirelessStatusText = findViewById(R.id.wirelessStatusText)
         screenshotTestButton = findViewById(R.id.screenshotTestButton)
 
+        // 初始化状态检测卡片视图
+        ladbIndicator = findViewById(R.id.ladbIndicator)
+        ladbStatus = findViewById(R.id.ladbStatus)
+        checkLadbButton = findViewById(R.id.checkLadbButton)
+        imeIndicator = findViewById(R.id.imeIndicator)
+        imeStatus = findViewById(R.id.imeStatus)
+        checkImeButton = findViewById(R.id.checkImeButton)
+        deviceIndicator = findViewById(R.id.deviceIndicator)
+        deviceStatus = findViewById(R.id.deviceStatus)
+        checkDeviceButton = findViewById(R.id.checkDeviceButton)
+
         // 初始化检测项视图
         ladbStatusImageView = findViewById(R.id.iv_ladb_status)
         setupLadbButton = findViewById(R.id.btn_setup_ladb)
@@ -185,7 +207,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupListeners() {
         enableServiceButton.setOnClickListener {
-            openAccessibilitySettings()
+            checkAllStatusBeforeEnableService()
         }
 
         saveButton.setOnClickListener {
@@ -321,6 +343,38 @@ class MainActivity : AppCompatActivity() {
 
         screenshotTestButton.setOnClickListener {
             performScreenshotTest()
+        }
+
+        // 状态检测卡片按钮点击事件
+        checkLadbButton.setOnClickListener {
+            // 如果 LADB 不可用，显示设置引导
+            if (!shellExecutor.isAdbLibraryAvailable()) {
+                setupLadb()
+            } else {
+                performLadbCheck()
+            }
+        }
+
+        checkImeButton.setOnClickListener {
+            // 如果输入法未安装，执行安装
+            val deviceController = DeviceController(this@MainActivity)
+            if (!deviceController.isADBKeyboardInstalled()) {
+                installInputMethod()
+            } else {
+                performImeCheck()
+            }
+        }
+
+        checkDeviceButton.setOnClickListener {
+            // 如果设备未连接，执行连接
+            mainScope.launch {
+                val isConnected = shellExecutor.getDevicesSuspending().isNotEmpty()
+                if (!isConnected) {
+                    connectDevice()
+                } else {
+                    performDeviceCheck()
+                }
+            }
         }
 
         // 设置检测项的点击事件
@@ -1133,6 +1187,10 @@ class MainActivity : AppCompatActivity() {
         checkLadbDetectionStatus()
         checkDeviceConnectionStatus()
         checkInputMethodStatus()
+
+        performDeviceCheck()
+        performImeCheck()
+        performLadbCheck()
     }
 
     /**
@@ -1674,6 +1732,193 @@ class MainActivity : AppCompatActivity() {
             }
             startService(intent)
             Log.d("MainActivity", "Stopped WirelessAdbPairingService on onDestroy")
+        }
+    }
+
+    /**
+     * 启用服务前检查所有状态
+     * 只有所有检测项都通过才能开启无障碍服务
+     */
+    private fun checkAllStatusBeforeEnableService() {
+        mainScope.launch {
+            try {
+                // 检测中状态
+                runOnUiThread {
+                    enableServiceButton.isEnabled = false
+                    enableServiceButton.text = "检测中..."
+                }
+
+                // 收集所有状态
+                val ladbAvailable = shellExecutor.isAdbLibraryAvailable()
+                val deviceController = DeviceController(this@MainActivity)
+                val imeInstalled = deviceController.isADBKeyboardInstalled()
+                val devices = shellExecutor.getDevicesSuspending()
+                val deviceConnected = devices.isNotEmpty()
+
+                runOnUiThread {
+                    // 同步更新状态检测卡片
+                    ladbIndicator.setBackgroundResource(
+                        if (ladbAvailable) R.drawable.status_indicator_on else R.drawable.status_indicator_off
+                    )
+                    ladbStatus.text = if (ladbAvailable) "LADB 已就绪" else "LADB 不可用"
+
+                    imeIndicator.setBackgroundResource(
+                        if (imeInstalled) R.drawable.status_indicator_on else R.drawable.status_indicator_off
+                    )
+                    imeStatus.text = if (imeInstalled) "输入法已安装" else "输入法未安装"
+
+                    deviceIndicator.setBackgroundResource(
+                        if (deviceConnected) R.drawable.status_indicator_on else R.drawable.status_indicator_off
+                    )
+                    deviceStatus.text = if (deviceConnected) "设备已连接 (${devices.size}个)" else "设备未连接"
+
+                    // 构建提示信息
+                    val issues = buildList {
+                        if (!ladbAvailable) add("❌ LADB 库不可用")
+                        if (!imeInstalled) add("❌ 输入法未安装")
+                        if (!deviceConnected) add("❌ 设备未连接")
+                    }
+
+                    if (issues.isEmpty()) {
+                        // 全部通过，打开无障碍设置
+                        openAccessibilitySettings()
+                    } else {
+                        // 有未通过的项，显示提示框
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("⚠️ 检测未通过")
+                            .setMessage(
+                                buildString {
+                                    append("以下检测项未通过，请先处理后再开启服务：\n\n")
+                                    issues.forEach { append(it).append("\n") }
+                                    append("\n请先完成状态检测卡片中的各项检测，确保全部通过后再开启无障碍服务。")
+                                }
+                            )
+                            .setPositiveButton("我知道了", null)
+                            .show()
+                    }
+
+                    enableServiceButton.isEnabled = true
+                    enableServiceButton.text = if (isAccessibilityServiceEnabled()) "已启用" else "启用服务"
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("⚠️ 检测失败")
+                        .setMessage("状态检测过程中发生错误：\n${e.message}")
+                        .setPositiveButton("确定", null)
+                        .show()
+                    enableServiceButton.isEnabled = true
+                    enableServiceButton.text = if (isAccessibilityServiceEnabled()) "已启用" else "启用服务"
+                }
+            }
+        }
+    }
+
+    /**
+     * 执行 LADB 状态检测
+     */
+    private fun performLadbCheck() {
+        mainScope.launch {
+            try {
+                // 检测中状态
+                runOnUiThread {
+                    ladbStatus.text = "检测中..."
+                    checkLadbButton.isEnabled = false
+                }
+
+                val isAvailable = shellExecutor.isAdbLibraryAvailable()
+
+                runOnUiThread {
+                    if (isAvailable) {
+                        ladbIndicator.setBackgroundResource(R.drawable.status_indicator_on)
+                        ladbStatus.text = "LADB 已就绪"
+                        checkLadbButton.visibility= View.GONE
+                    } else {
+                        ladbIndicator.setBackgroundResource(R.drawable.status_indicator_off)
+                        ladbStatus.text = "LADB 不可用"
+                    }
+                    checkLadbButton.isEnabled = true
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    ladbIndicator.setBackgroundResource(R.drawable.status_indicator_off)
+                    ladbStatus.text = "检测失败: ${e.message}"
+                    checkLadbButton.isEnabled = true
+                }
+            }
+        }
+    }
+
+    /**
+     * 执行输入法检测
+     */
+    private fun performImeCheck() {
+        mainScope.launch {
+            try {
+                // 检测中状态
+                runOnUiThread {
+                    imeStatus.text = "检测中..."
+                    checkImeButton.isEnabled = false
+                }
+
+                val deviceController = DeviceController(this@MainActivity)
+                val isInstalled = deviceController.isADBKeyboardInstalled()
+
+                runOnUiThread {
+                    if (isInstalled) {
+                        imeIndicator.setBackgroundResource(R.drawable.status_indicator_on)
+                        imeStatus.text = "输入法已安装"
+                        checkImeButton.visibility = View.GONE
+                    } else {
+                        imeIndicator.setBackgroundResource(R.drawable.status_indicator_off)
+                        imeStatus.text = "输入法未安装"
+                        checkImeButton.text="安装"
+                    }
+                    checkImeButton.isEnabled = true
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    imeIndicator.setBackgroundResource(R.drawable.status_indicator_off)
+                    imeStatus.text = "检测失败: ${e.message}"
+                    checkImeButton.isEnabled = true
+                }
+            }
+        }
+    }
+
+    /**
+     * 执行设备连接检测
+     */
+    private fun performDeviceCheck() {
+        mainScope.launch {
+            try {
+                // 检测中状态
+                runOnUiThread {
+                    deviceStatus.text = "检测中..."
+                    checkDeviceButton.isEnabled = false
+                }
+
+                val devices = shellExecutor.getDevicesSuspending()
+                val isConnected = devices.isNotEmpty()
+
+                runOnUiThread {
+                    if (isConnected) {
+                        deviceIndicator.setBackgroundResource(R.drawable.status_indicator_on)
+                        deviceStatus.text = "设备已连接 (${devices.size}个)"
+                    } else {
+                        deviceIndicator.setBackgroundResource(R.drawable.status_indicator_off)
+                        deviceStatus.text = "设备未连接"
+                        checkDeviceButton.text = "连接"
+                    }
+                    checkDeviceButton.isEnabled = true
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    deviceIndicator.setBackgroundResource(R.drawable.status_indicator_off)
+                    deviceStatus.text = "检测失败: ${e.message}"
+                    checkDeviceButton.isEnabled = true
+                }
+            }
         }
     }
 }
