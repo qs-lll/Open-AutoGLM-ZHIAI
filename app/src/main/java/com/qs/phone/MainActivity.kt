@@ -202,7 +202,8 @@ class MainActivity : AppCompatActivity() {
 
         continuousSearchButton.setOnClickListener {
             if (!isContinuousSearching) {
-                startContinuousSearch()
+                // 显示对话框尝试 DNS 连接，失败时自动切换到配对模式
+                showContinuousSearchDialog()
             } else {
                 stopContinuousSearch()
             }
@@ -693,6 +694,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 显示连续搜索对话框
+     * 尝试 DNS 连接，失败时自动切换到配对模式
+     */
+    private fun showContinuousSearchDialog() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_dns_connection, null)
+        val statusText = dialogView.findViewById<TextView>(R.id.dnsStatusText)
+        val cancelButton = dialogView.findViewById<Button>(R.id.dnsCancelButton)
+
+        // 创建对话框
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("🔍 持续搜索设备")
+            .setView(dialogView)
+            .setCancelable(false)  // 默认不可取消，除非用户点击取消按钮
+            .create()
+
+        // 开始搜索
+        startContinuousSearchWithDialog(statusText, dialog, cancelButton)
+
+        // 取消按钮点击事件
+        cancelButton.setOnClickListener {
+            stopContinuousSearch()
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    /**
      * 开始DNS搜索设备（按照LADB完整初始化流程）
      */
     private fun startDnsSearch(statusText: TextView, dialog: AlertDialog, cancelButton: Button) {
@@ -702,6 +731,7 @@ class MainActivity : AppCompatActivity() {
         cancelButton.isEnabled = true
 
         dnsSearchJob = mainScope.launch {
+            var success = false  // 提前声明，避免 finally 中访问未初始化的变量
             try {
                 // 检查网络状态权限
                 if (checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -722,14 +752,35 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // 按照LADB方式执行完整初始化
-                val success = performLadbDnsConnection(shell, statusText)
+                success = performLadbDnsConnection(shell, statusText)
 
                 if (success) {
                     val devices = shell.getDevicesSuspending()
                     statusText.text = "✅ DNS连接成功！\n\n发现设备:\n${devices.joinToString("\n")}"
                 } else {
-                    statusText.text =
-                        "❌ DNS连接失败\n\n请确保：\n• 无线调试已开启\n• 已配对本机设备\n• 网络连接正常"
+                    // 连接失败，显示配对模式引导，不关闭Dialog
+                    statusText.text = """
+                        ❌ DNS连接失败
+
+                        正在自动切换到配对模式...
+
+                        📱 请按以下步骤操作：
+                        1. 打开手机「设置」→「开发者选项」
+                        2. 进入「无线调试」→「使用配对码配对设备」
+                        3. 通知栏输入配对码
+
+                        ⏳ 正在搜索配对服务...
+                    """.trimIndent()
+
+                    // 修改取消按钮为"打开开发者选项"
+                    cancelButton.text = "打开开发者选项"
+                    cancelButton.setOnClickListener {
+                        DeveloperOptionsHelper.openDeveloperOptionsSettings(this@MainActivity)
+                        dialog.dismiss()
+                    }
+
+                    // 自动启动配对模式
+                    startWirelessPairingMode()
                 }
 
             } catch (e: Exception) {
@@ -746,10 +797,121 @@ class MainActivity : AppCompatActivity() {
                         shellExecutor.isAdbLibraryAvailable() && !isDnsSearching
                 }
 
-                // 3秒后自动关闭对话框
-                delay(3000)
-                dialog.dismiss()
+                // 只有在成功时才3秒后关闭对话框
+                if (success) {
+                    delay(3000)
+                    dialog.dismiss()
+                }
+                // 如果失败了（已切换到配对模式），保持对话框打开
             }
+        }
+    }
+
+    /**
+     * 开始连续搜索（带对话框）
+     * 尝试 DNS 连接，失败时自动切换到配对模式
+     */
+    private fun startContinuousSearchWithDialog(statusText: TextView, dialog: AlertDialog, cancelButton: Button) {
+        isContinuousSearching = true
+        continuousSearchButton.text = "停止搜索"
+        continuousSearchButton.isEnabled = true
+        cancelButton.isEnabled = true
+
+        mainScope.launch {
+            var success = false
+            try {
+                // 检查网络状态权限
+                if (checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    statusText.text = "❌ 缺少网络状态权限\n\n请授予权限后重试"
+                    delay(3000)
+                    dialog.dismiss()
+                    return@launch
+                }
+
+                statusText.text = "🔄 正在搜索设备..."
+                statusText.append("\n\n请确保已开启无线调试")
+
+                // 检查 LADB 库
+                val shell = shellExecutor
+                if (!shell.isAdbLibraryAvailable()) {
+                    statusText.text = "❌ LADB 库不可用\n\n请确保应用权限正常"
+                    return@launch
+                }
+
+                // 尝试 DNS 连接
+                success = performLadbDnsConnection(shell, statusText)
+
+                if (success) {
+                    val devices = shell.getDevicesSuspending()
+                    statusText.text = "✅ 搜索成功！\n\n发现设备:\n${devices.joinToString("\n")}"
+                    isContinuousSearching = false
+                    runOnUiThread {
+                        continuousSearchButton.text = "🔍 持续搜索设备"
+                    }
+                } else {
+                    // 连接失败，显示配对模式引导，不关闭 Dialog
+                    statusText.text = """
+                        ❌ 未发现设备
+
+                        正在自动切换到配对模式...
+
+                        📱 请按以下步骤操作：
+                        1. 打开手机「设置」→「开发者选项」
+                        2. 进入「无线调试」→「使用配对码配对设备」
+                        3. 等待下方显示配对码后输入到通知栏
+
+                        ⏳ 正在搜索配对服务...
+                    """.trimIndent()
+
+                    isContinuousSearching = false
+                    runOnUiThread {
+                        continuousSearchButton.text = "🔍 持续搜索设备"
+                    }
+
+                    // 修改取消按钮为"打开开发者选项"
+                    cancelButton.text = "打开开发者选项"
+                    cancelButton.setOnClickListener {
+                        DeveloperOptionsHelper.openDeveloperOptionsSettings(this@MainActivity)
+                        dialog.dismiss()
+                    }
+
+                    // 自动启动配对模式
+                    startWirelessPairingMode()
+                }
+
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Continuous search error", e)
+                statusText.text = "❌ 搜索过程中发生错误\n\n${e.message}"
+                isContinuousSearching = false
+                runOnUiThread {
+                    continuousSearchButton.text = "🔍 持续搜索设备"
+                }
+            } finally {
+                // 只有在成功时才3秒后关闭对话框
+                if (success) {
+                    delay(3000)
+                    dialog.dismiss()
+                }
+                // 如果失败了（已切换到配对模式），保持对话框打开
+            }
+        }
+    }
+
+    /**
+     * 启动无线调试配对模式
+     * 当DNS连接失败时自动切换到配对模式
+     */
+    private fun startWirelessPairingMode() {
+        try {
+            // 启动配对服务
+            val intent = Intent(this@MainActivity, WirelessAdbPairingService::class.java).apply {
+                action = WirelessAdbPairingService.ACTION_START_PAIRING
+            }
+            startForegroundService(intent)
+
+            Log.d("MainActivity", "Auto-started wireless pairing mode after DNS connection failure")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to start wireless pairing mode", e)
         }
     }
 
